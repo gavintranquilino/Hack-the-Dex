@@ -108,7 +108,7 @@ static void print_string_embedded(const char* str, int x, int y, u16* offscreen)
     }
 }
 
-void show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str) {
+int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str) {
     // 1. Write the profile.json inside the timestamp folder
     char json_path[512];
 #ifdef EMU
@@ -157,7 +157,37 @@ void show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char*
         swiWaitForVBlank();
         scanKeys();
         if (keysDown() & KEY_A) {
-            break;
+
+            // gavin make sure the progression doesn't actually work and then return 0 to go to next screen ONLY IF THEY SCAN QR - so remove this
+            return 0;
         }
+
+        if (keysDown() & KEY_B) {
+            return 1;
+        }
+
+        if (keysDown() & KEY_SELECT) {
+
+            // dummy code to skip network
+
+            FILE* f = fopen(json_path, "w");
+            if (f) {
+                fprintf(f, "{\n");
+                fprintf(f, "  \"name\": \"Who Knows %s\",\n", timestamp_str);
+                fprintf(f, "  \"pronouns\": \"?\",\n");
+                fprintf(f, "  \"instagram\": \"@testuser\",\n");
+                fprintf(f, "  \"discord\": \"test\",\n");
+                fprintf(f, "  \"linkedin\": \"test\",\n");
+                fprintf(f, "  \"twitter\": \"the goat\",\n");
+                fprintf(f, "  \"photo\": \"photo.bmp\",\n");
+                fprintf(f, "  \"signature\": \"signature.bmp\"\n");
+                fprintf(f, "}\n");
+                fclose(f);
+            }
+
+            return 0;
+        }
+
+
     }
 }
