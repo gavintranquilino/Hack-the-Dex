@@ -8,8 +8,8 @@
 #include <string.h>
 
 // Update these with your Ngrok TCP tunnel address
-#define TARGET_HOST "0.tcp.ngrok.io"
-#define TARGET_PORT "12345"
+#define TARGET_HOST "4.tcp.ngrok.io"
+#define TARGET_PORT "15145"
 #define WIFI_CONNECT_TIMEOUT_FRAMES (60 * 30)
 
 static void wait_forever(void) {
@@ -51,8 +51,6 @@ void sendFrameOverTCP(const uint8_t* buffer, size_t size) {
     hints.ai_socktype = SOCK_STREAM;
 
     printf("Resolving %s...\n", TARGET_HOST);
-    
-    // getaddrinfo handles the DNS lookup so Ngrok URLs work perfectly
     if (getaddrinfo(TARGET_HOST, TARGET_PORT, &hints, &result) != 0) {
         printf("DNS lookup failed.\n");
         return;
@@ -67,13 +65,25 @@ void sendFrameOverTCP(const uint8_t* buffer, size_t size) {
 
     printf("Connecting to proxy...\n");
     if (connect(socket_fd, result->ai_addr, result->ai_addrlen) == 0) {
-        printf("Connected! Sending frame...\n");
+        printf("Connected! Streaming frame...\n");
         
         size_t total_sent = 0;
+        size_t chunk_size = 1024; // Send in safe 1KB blocks
+        
         while (total_sent < size) {
-            int sent = send(socket_fd, buffer + total_sent, size - total_sent, 0);
-            if (sent < 0) break; // Error occurred
+            size_t remaining = size - total_sent;
+            size_t to_send = (remaining < chunk_size) ? remaining : chunk_size;
+            
+            int sent = send(socket_fd, buffer + total_sent, to_send, 0);
+            if (sent < 0) {
+                printf("Send error at byte %u\n", (unsigned int)total_sent);
+                break;
+            }
+            
             total_sent += sent;
+            
+            // Allow background DSwifi stack time to process packets
+            swiWaitForVBlank();
         }
         
         if (total_sent == size) {
