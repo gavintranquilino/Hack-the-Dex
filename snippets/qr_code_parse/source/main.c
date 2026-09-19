@@ -1,229 +1,162 @@
 #include <nds.h>
+#include <dswifi9.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>       
+#include <unistd.h>
 #include <stdio.h>
-#include <fat.h>
+#include <string.h>
 
 // ---------------------------------------------------------
-// Save current camera frame as BMP
+// Configuration - UPDATE WITH YOUR NGROK URL & PORT
 // ---------------------------------------------------------
-void savePicture(u16* vramData) {
+#define TARGET_HOST "4.tcp.ngrok.io" // Remove "tcp://"
+#define TARGET_PORT 15145            // Your current Ngrok port
 
-    if (!fatInitDefault()) {
-        printf("Failed to access SD card!\n");
-
-        while(1) {
-            swiWaitForVBlank();
-        }
-        
-    }
-
-    printf("FAT Initialized successfully.\n");
-
-
-    FILE* file = fopen("sd:/capture.bmp", "wb");
-
-    if (!file) {
-        printf("Failed to open capture.bmp for writing!\n");
+// ---------------------------------------------------------
+// TCP Communication
+// ---------------------------------------------------------
+void sendFrameOverTCP(const uint8_t* buffer, size_t size) {
+    printf("Resolving DNS for %s...\n", TARGET_HOST);
+    
+    struct hostent *host = gethostbyname(TARGET_HOST);
+    if (!host) {
+        printf("DNS resolution failed! Check Wi-Fi.\n");
         return;
     }
 
-    printf("File opened successfully\n");
-
-    // 54-byte BMP header
-    // 256 x 192, 24-bit RGB
-    u8 header[54] = {
-        0x42, 0x4D,                         // BM
-        0x36, 0x40, 0x02, 0x00,             // File size
-        0x00, 0x00, 0x00, 0x00,             // Reserved
-        0x36, 0x00, 0x00, 0x00,             // Pixel data offset
-
-        0x28, 0x00, 0x00, 0x00,             // DIB header size
-
-        0x00, 0x01, 0x00, 0x00,             // Width = 256
-        0xC0, 0x00, 0x00, 0x00,             // Height = 192
-
-        0x01, 0x00,                         // Color planes
-        0x18, 0x00,                         // 24-bit
-
-        0x00, 0x00, 0x00, 0x00,             // Compression
-        0x00, 0x40, 0x02, 0x00,             // Image size
-
-        0x00, 0x00, 0x00, 0x00,             // X pixels/meter
-        0x00, 0x00, 0x00, 0x00,             // Y pixels/meter
-        0x00, 0x00, 0x00, 0x00,             // Colors used
-        0x00, 0x00, 0x00, 0x00              // Important colors
-    };
-
-    fwrite(header, 1, 54, file);
-
-    // BMP is stored bottom-to-top
-    for (int y = 191; y >= 0; y--) {
-
-        for (int x = 0; x < 256; x++) {
-
-            u16 pixel = vramData[y * 256 + x];
-
-            u8 red   = ((pixel >> 0) & 0x1F) << 3;
-            u8 green = ((pixel >> 5) & 0x1F) << 3;
-            u8 blue  = ((pixel >> 10) & 0x1F) << 3;
-
-            // BMP uses BGR order
-            u8 bgr[3] = {
-                blue,
-                green,
-                red
-            };
-
-            fwrite(bgr, 1, 3, file);
-        }
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        printf("Failed to create socket.\n");
+        return;
     }
 
-    fclose(file);
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(TARGET_PORT);
+    
+    memcpy(&serv_addr.sin_addr.s_addr, host->h_addr_list[0], host->h_length);
 
-    printf("Picture saved to capture.bmp!\n");
+    printf("Connecting to %s:%d...\n", TARGET_HOST, TARGET_PORT);
+
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
+        printf("Connected! Streaming payload...\n");
+
+        size_t total_sent = 0;
+        while (total_sent < size) {
+            int sent = send(sock, buffer + total_sent, size - total_sent, 0);
+            if (sent < 0) break;
+            total_sent += sent;
+        }
+
+        if (total_sent == size) {
+            printf("Data fired successfully!\n");
+        } else {
+            printf("Error during transmission.\n");
+        }
+    } else {
+        printf("Connection refused by Ngrok.\n");
+    }
+
+    close(sock);
 }
-
 
 // ---------------------------------------------------------
 // Main
 // ---------------------------------------------------------
 int main(int argc, char* argv[]) {
-
-    // -----------------------------------------------------
-    // DSi check
-    // -----------------------------------------------------
     if (!isDSiMode()) {
-
         consoleDemoInit();
-
         printf("ERROR: This app requires a DSi.\n");
-
-        while (1) {
-            swiWaitForVBlank();
-        }
+        while (1) swiWaitForVBlank();
     }
 
+    consoleDemoInit();
+    
+    // -------------------------------------------------
+    // Auto-Connect using DSi Advanced Settings (WPA2)
+    // -------------------------------------------------
+    printf("Initializing Wi-Fi (DSi WPA2 Mode)...\n");
 
-    // -----------------------------------------------------
-    // Top screen
-    // -----------------------------------------------------
+    if (!Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE)) {
+        printf("Wi-Fi init failed.\n");
+        while (1) swiWaitForVBlank();
+    }
+
+    printf("Connecting to saved WPA2 network...\n");
+    Wifi_AutoConnect(); 
+
+    int status;
+    while ((status = Wifi_AssocStatus()) == ASSOCSTATUS_SEARCHING ||
+           status == ASSOCSTATUS_AUTHENTICATING ||
+           status == ASSOCSTATUS_ASSOCIATING) {
+        swiWaitForVBlank();
+    }
+
+    if (status != ASSOCSTATUS_ASSOCIATED) {
+        printf("Failed to connect! Status: %d\n", status);
+        printf("Check HTN credentials in Connections 4-6.\n");
+        while(1) swiWaitForVBlank();
+    }
+
+    printf("Connected to HTN successfully!\n\n");
+
+    // -------------------------------------------------
+    // Camera Setup
+    // -------------------------------------------------
     videoSetMode(MODE_5_2D);
-
     vramSetBankA(VRAM_A_MAIN_BG_0x06000000);
-
-    int bg = bgInit(
-        3,
-        BgType_Bmp16,
-        BgSize_B16_256x256,
-        0,
-        0
-    );
-
+    int bg = bgInit(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* cameraBuffer = bgGetGfxPtr(bg);
 
-
-    // -----------------------------------------------------
-    // Bottom screen
-    // -----------------------------------------------------
-    videoSetModeSub(MODE_0_2D);
-
-    consoleDemoInit();
-
-
-    // -----------------------------------------------------
-    // Camera initialization
-    // -----------------------------------------------------
-    printf("DSi Camera Test\n");
-    printf("----------------\n\n");
-
-    printf("Initializing camera...\n");
-
     cameraInit();
-
     int activeCamera = CAMERA_OUTER;
-
     cameraSelect(activeCamera);
 
-    printf("Camera ready.\n\n");
-
+    printf("--- Scanner Ready ---\n");
     printf("A = Switch Camera\n");
-    printf("X = Take Picture\n");
+    printf("X = Capture & Send via Ngrok\n");
     printf("START = Quit\n");
 
+    uint8_t grayscaleBuffer[256 * 192];
 
-    // -----------------------------------------------------
-    // Main loop
-    // -----------------------------------------------------
     while (1) {
-
-        // Wait for next frame
         swiWaitForVBlank();
-
-
-        // -------------------------------------------------
-        // Camera stream
-        // -------------------------------------------------
-        cameraStartTransfer(
-            cameraBuffer,
-            MCUREG_APT_SEQ_CMD_PREVIEW,
-            1
-        );
-
-
-        // -------------------------------------------------
-        // Read buttons
-        // -------------------------------------------------
+        cameraStartTransfer(cameraBuffer, MCUREG_APT_SEQ_CMD_PREVIEW, 1);
+        
         scanKeys();
-
         int keys = keysDown();
 
-
-        // -------------------------------------------------
-        // A = switch camera
-        // -------------------------------------------------
         if (keys & KEY_A) {
-
-            if (activeCamera == CAMERA_OUTER) {
-                activeCamera = CAMERA_INNER;
-            }
-            else {
-                activeCamera = CAMERA_OUTER;
-            }
-
+            activeCamera = (activeCamera == CAMERA_OUTER) ? CAMERA_INNER : CAMERA_OUTER;
             cameraSelect(activeCamera);
-
-            printf(
-                "Camera switched to: %s\n",
-                (activeCamera == CAMERA_OUTER)
-                    ? "OUTER"
-                    : "INNER"
-            );
+            printf("Switched camera.\n");
         }
 
-
-        // -------------------------------------------------
-        // X = take picture
-        // -------------------------------------------------
         if (keys & KEY_X) {
+            printf("\nProcessing Frame...\n");
 
-            printf("Taking picture...\n");
+            for (int i = 0; i < (256 * 192); i++) {
+                u16 pixel = cameraBuffer[i];
+                u8 r = ((pixel >> 0) & 0x1F) << 3;
+                u8 g = ((pixel >> 5) & 0x1F) << 3;
+                u8 b = ((pixel >> 10) & 0x1F) << 3;
+                
+                grayscaleBuffer[i] = (r * 77 + g * 150 + b * 29) >> 8;
+            }
 
-            savePicture(cameraBuffer);
+            sendFrameOverTCP(grayscaleBuffer, sizeof(grayscaleBuffer));
+            printf("Ready for next scan.\n");
         }
 
-
-        // -------------------------------------------------
-        // START = quit
-        // -------------------------------------------------
         if (keys & KEY_START) {
             break;
         }
     }
 
-
-    // -----------------------------------------------------
-    // Shutdown
-    // -----------------------------------------------------
     cameraDeinit();
-
+    Wifi_DisconnectAP();
     return 0;
 }

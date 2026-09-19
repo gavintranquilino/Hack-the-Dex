@@ -1,20 +1,17 @@
-# SPDX-License-Identifier: CC0-1.0
-#
-# SPDX-FileContributor: Antonio Niño Díaz, 2024
-
-BLOCKSDS    ?= /opt/blocksds/core
-
 # User config
+NAME          := qr_code_parser
+GAME_TITLE    := QR Parse
+GAME_SUBTITLE := Wi-Fi Demo
 
-NAME        := qr_test_parse
-GAME_TITLE  := QR Parse Test
-GAME_SUBTITLE   := Gurt
+# CRITICAL: We must assign an ARM7 core that includes the Wi-Fi drivers
+ARM7ELF       := $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi_maxmod.elf
 
-# Source code paths
-# GFXDIRS       = graphics
+# The libraries to link against
+LIBS          := -ldswifi9 -lnds9
 
-# Libraries to link (Order matters: -lfat must come before -lnds9)
-# LIBS        := -lnds9
+# The directories where the compiler should look for the libraries AND their .h headers
+LIBDIRS       := $(BLOCKSDS)/libs/dswifi \
+                 $(BLOCKSDS)/libs/libnds
 
-# Include the BlocksDS compilation rules
+# Include the core BlocksDS ARM9 build rules
 include $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile
