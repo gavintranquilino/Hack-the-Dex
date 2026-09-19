@@ -82,7 +82,6 @@ static void print_string(const char* str, int x, int y, u16* offscreen) {
 
         for (int ty = 0; ty < 8; ty++) {
             u8 row = font5x7[char_index][ty];
-            // Only loop through 5 bits of width
             for (int tx = 0; tx < 5; tx++) {
                 if (row & (1 << (7 - tx))) {
                     int px = curr_x + tx;
@@ -93,7 +92,6 @@ static void print_string(const char* str, int x, int y, u16* offscreen) {
                 }
             }
         }
-        // Advance by 6 (5 pixels + 1px spacing)
         curr_x += 6;
     }
 }
@@ -157,31 +155,39 @@ void show_profile_view(DexUser* user, u16* top_vram) {
     }
 
     // TOP SCREEN
-    int name_width = strlen(user->name) * 6; // Adjusted for 6px width
+    int name_width = strlen(user->name) * 6;
     int name_x = (256 - name_width) / 2;
     print_string(user->name, name_x, 12, off_top);
     
     draw_scaled_bmp_box(user->signature_path, off_top, 32, 40, 192, 112);
-    
-    // 12 chars * 6 width = 72. 256 - 72 - 3 = 181
     print_string("HACK THE DEX", 181, 192 - 8 - 3, off_top);
 
-    // BOTTOM SCREEN
-    int ty = 20;
-    print_string("NAME:", 16, ty, off_bot);          ty += 10;
-    print_string(user->name, 24, ty, off_bot);      ty += 16; // Tighter vertical spacing
+    // BOTTOM SCREEN (Dynamic Fields)
+    int ty = 12;
 
-    if(strlen(user->email) > 0) {
-        print_string("EMAIL:", 16, ty, off_bot);    ty += 10;
-        print_string(user->email, 24, ty, off_bot); ty += 16;
+    if (strlen(user->name) > 0) {
+        print_string("NAME:", 12, ty, off_bot);      ty += 9;
+        print_string(user->name, 18, ty, off_bot);  ty += 13;
     }
-    if(strlen(user->discord) > 0) {
-        print_string("DISCORD:", 16, ty, off_bot);  ty += 10;
-        print_string(user->discord, 24, ty, off_bot); ty += 16;
+    if (strlen(user->pronouns) > 0) {
+        print_string("PRONOUNS:", 12, ty, off_bot); ty += 9;
+        print_string(user->pronouns, 18, ty, off_bot); ty += 13;
     }
-    if(strlen(user->instagram) > 0) {
-        print_string("INSTAGRAM:", 16, ty, off_bot); ty += 10;
-        print_string(user->instagram, 24, ty, off_bot);
+    if (strlen(user->discord) > 0) {
+        print_string("DISCORD:", 12, ty, off_bot);  ty += 9;
+        print_string(user->discord, 18, ty, off_bot); ty += 13;
+    }
+    if (strlen(user->twitter) > 0) {
+        print_string("TWITTER:", 12, ty, off_bot);  ty += 9;
+        print_string(user->twitter, 18, ty, off_bot); ty += 13;
+    }
+    if (strlen(user->instagram) > 0) {
+        print_string("INSTAGRAM:", 12, ty, off_bot); ty += 9;
+        print_string(user->instagram, 18, ty, off_bot); ty += 13;
+    }
+    if (strlen(user->linkedin) > 0) {
+        print_string("LINKEDIN:", 12, ty, off_bot);  ty += 9;
+        print_string(user->linkedin, 18, ty, off_bot); ty += 13;
     }
 
     draw_scaled_bmp_box(user->photo_path, off_bot, 140, 40, 100, 100);

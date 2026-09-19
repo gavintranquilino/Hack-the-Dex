@@ -7,6 +7,11 @@
 #include <ctype.h>
 #include "cJSON.h"
 #include "profile_view.h"
+#include "network_connection.h"
+#include <time.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 
 // GameBoy Theme Colors
 #define GB_BG_COLOR   RGB15(17, 21, 1)
@@ -87,11 +92,54 @@ static const u8 font5x7[64][8] = {
   {0x88,0x88,0x50,0x20,0x20,0x20,0x20,0x00}, // 89 Y
   {0xF8,0x08,0x10,0x20,0x40,0x80,0xF8,0x00}, // 90 Z
   {0x60,0x40,0x40,0x40,0x40,0x40,0x60,0x00}, // 91 [
-  {0x00,0x80,0x40,0x20,0x10,0x08,0x00,0x00}, // 92 \
+  {0x00,0x80,0x40,0x20,0x10,0x08,0x00,0x00}, // 92 
   {0x30,0x10,0x10,0x10,0x10,0x10,0x30,0x00}, // 93 ]
   {0x20,0x50,0x88,0x00,0x00,0x00,0x00,0x00}, // 94 ^
   {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF8}  // 95 _
 };
+
+
+int delete_directory_recursive(const char* path) {
+    DIR* dir = opendir(path);
+
+    // If we can't open it, fail
+    if (!dir) {
+        return -1;
+    }
+
+    struct dirent* ent;
+
+    while ((ent = readdir(dir)) != NULL) {
+        // Ignore . and ..
+        if (strcmp(ent->d_name, ".") == 0 ||
+            strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path),
+                 "%s/%s", path, ent->d_name);
+
+        if (ent->d_type == DT_DIR) {
+            // Recursively delete subdirectory
+            if (delete_directory_recursive(full_path) != 0) {
+                closedir(dir);
+                return -1;
+            }
+        } else {
+            // Delete file
+            if (unlink(full_path) != 0) {
+                closedir(dir);
+                return -1;
+            }
+        }
+    }
+
+    closedir(dir);
+
+    // Now the directory is empty
+    return rmdir(path);
+}
 
 // ---------------------------------------------------------
 // Profile Parsing Logic
@@ -117,17 +165,25 @@ void parse_profile(const char* path, DexUser* user) {
         if (cJSON_IsString(item) && item->valuestring) 
             strncpy(user->name, item->valuestring, sizeof(user->name) - 1);
 
-        item = cJSON_GetObjectItemCaseSensitive(json, "email");
+        item = cJSON_GetObjectItemCaseSensitive(json, "pronouns");
         if (cJSON_IsString(item) && item->valuestring) 
-            strncpy(user->email, item->valuestring, sizeof(user->email) - 1);
+            strncpy(user->pronouns, item->valuestring, sizeof(user->pronouns) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "discord");
         if (cJSON_IsString(item) && item->valuestring) 
             strncpy(user->discord, item->valuestring, sizeof(user->discord) - 1);
 
+        item = cJSON_GetObjectItemCaseSensitive(json, "twitter");
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->twitter, item->valuestring, sizeof(user->twitter) - 1);
+
         item = cJSON_GetObjectItemCaseSensitive(json, "instagram");
         if (cJSON_IsString(item) && item->valuestring) 
             strncpy(user->instagram, item->valuestring, sizeof(user->instagram) - 1);
+
+        item = cJSON_GetObjectItemCaseSensitive(json, "linkedin");
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->linkedin, item->valuestring, sizeof(user->linkedin) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "photo");
         if (cJSON_IsString(item) && item->valuestring) 
@@ -373,7 +429,33 @@ int main(int argc, char* argv[]) {
 
         if (keys_once & KEY_A) {
             if (selected_index == 0) {
-                // Trigger QR/Wi-Fi Code
+                // 1. Generate current timestamp string (e.g., 20260919_173000)
+                time_t rawtime;
+                time(&rawtime);
+                struct tm *info = localtime(&rawtime);
+                char timestamp_str[32];
+                strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", info);
+
+                // 2. Create the timestamp folder immediately so other modules can use it
+                mkdir("sd:/hackthedex", 0777);
+
+                char dir_path[512];
+                snprintf(dir_path, sizeof(dir_path), "sd:/hackthedex/%s", timestamp_str);
+                mkdir(dir_path, 0777);
+
+                // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
+                show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
+
+                // 4. Reload users so the folder appears on the home screen
+                load_users();
+                total_items = num_users + 1;
+
+                // --- RETURN RECOVERY ---
+                videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
+                bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+                bottom_vram = bgGetGfxPtr(bg3_sub);
+                
+                prev_index = -1;
             } else {
                 // Launch the Detailed View Module
                 show_profile_view(&users[selected_index - 1], top_vram);
@@ -387,6 +469,34 @@ int main(int argc, char* argv[]) {
                 // Force UI to redraw both screens
                 prev_index = -1;
             }
+        }
+
+        if (keys_once & KEY_X) {
+            if (selected_index > 0) {
+                // Delete selected user folder
+                if (delete_directory_recursive(users[selected_index - 1].dir_path) == 0) {
+
+                    // Reload users after deletion
+                    load_users();
+                    total_items = num_users + 1;
+
+                    // Keep selection valid
+                    if (selected_index >= total_items) {
+                        selected_index = total_items - 1;
+                    }
+
+                    if (selected_index < 0) {
+                        selected_index = 0;
+                    }
+
+                    // Force the screens to redraw
+                    prev_index = -1;
+                }
+            }
+        }
+
+        if (keys_once & KEY_START) {
+            break;
         }
     }
 
