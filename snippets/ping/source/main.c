@@ -9,6 +9,7 @@
 
 #define TARGET_HOST "google.com"
 #define TARGET_PORT "80"
+#define WIFI_CONNECT_TIMEOUT_FRAMES (60 * 30)
 
 static void wait_forever(void)
 {
@@ -19,17 +20,19 @@ static void wait_forever(void)
 static int connect_to_wifi(void)
 {
     int status;
+    int frames = 0;
 
     printf("Connecting using saved DSi Wi-Fi settings...\n");
-    Wifi_AutoConnect();
 
     do {
         status = Wifi_AssocStatus();
         swiWaitForVBlank();
-    } while (status == ASSOCSTATUS_SEARCHING ||
-             status == ASSOCSTATUS_AUTHENTICATING ||
-             status == ASSOCSTATUS_ASSOCIATING ||
-             status == ASSOCSTATUS_ACQUIRINGDHCP);
+        frames++;
+    } while ((status == ASSOCSTATUS_SEARCHING ||
+              status == ASSOCSTATUS_AUTHENTICATING ||
+              status == ASSOCSTATUS_ASSOCIATING ||
+              status == ASSOCSTATUS_ACQUIRINGDHCP) &&
+             frames < WIFI_CONNECT_TIMEOUT_FRAMES);
 
     if (status != ASSOCSTATUS_ASSOCIATED) {
         printf("Wi-Fi failed: %d\n", status);
@@ -88,7 +91,7 @@ int main(void)
     }
 
     printf("Initializing Wi-Fi...\n");
-    if (!Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE)) {
+    if (!Wifi_InitDefault(WFC_CONNECT | WIFI_ATTEMPT_DSI_MODE)) {
         printf("Wi-Fi init failed.\n");
         wait_forever();
     }
