@@ -6,6 +6,11 @@
 
 #define GB_BG_COLOR   RGB15(17, 21, 1)
 #define GB_TEXT_COLOR RGB15(1, 7, 1)
+#define ROOT_DIR "sd:/hackthedex"
+
+#ifdef EMU
+#define PROFILE_DIR ROOT_DIR "/emulator"
+#endif
 
 // Crisp 5x7 Embedded Font
 static const u8 font5x7[64][8] = {
@@ -106,7 +111,11 @@ static void print_string_embedded(const char* str, int x, int y, u16* offscreen)
 void show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str) {
     // 1. Write the profile.json inside the timestamp folder
     char json_path[512];
-    snprintf(json_path, sizeof(json_path), "sd:/hackthedex/%s/profile.json", timestamp_str);
+#ifdef EMU
+    snprintf(json_path, sizeof(json_path), "%s/profile.json", PROFILE_DIR);
+#else
+    snprintf(json_path, sizeof(json_path), "%s/%s/profile.json", ROOT_DIR, timestamp_str);
+#endif
     
     FILE* f = fopen(json_path, "w");
     if (f) {

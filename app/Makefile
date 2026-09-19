@@ -10,12 +10,13 @@ NAME := hack_the_dex
 GAME_TITLE := Hack the Dex
 GAME_SUBTITLE := Hack the North 2026 Project
 
-# Libraries
+# Emulator build
+EMU ?= 0
 
-# Added -lfat for SD card access and -lm for cJSON math dependencies
-LIBS := -ldswifi9 -lfat -lm -lnds9
+ifeq ($(EMU),1)
+    CFLAGS += -DEMU
+endif
 
-# Added the libfat directory to the search paths
 # Libraries
 
 LIBS := -ldswifi9 -lm -lnds9

@@ -18,6 +18,11 @@
 #define GB_TEXT_COLOR RGB15(1, 7, 1)
 
 #define ROOT_DIR "sd:/hackthedex"
+
+#ifdef EMU
+#define PROFILE_DIR ROOT_DIR "/emulator"
+#endif
+
 #define MAX_USERS 50
 
 DexUser users[MAX_USERS];
@@ -139,6 +144,20 @@ int delete_directory_recursive(const char* path) {
 
     // Now the directory is empty
     return rmdir(path);
+}
+
+static bool ensure_directory(const char* path) {
+    if (mkdir(path, 0777) == 0) {
+        return true;
+    }
+
+    DIR* dir = opendir(path);
+    if (!dir) {
+        return false;
+    }
+
+    closedir(dir);
+    return true;
 }
 
 // ---------------------------------------------------------
@@ -436,12 +455,17 @@ int main(int argc, char* argv[]) {
                 char timestamp_str[32];
                 strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", info);
 
-                // 2. Create the timestamp folder immediately so other modules can use it
-                mkdir("sd:/hackthedex", 0777);
-
+#ifdef EMU
+                // Pre-create sd:/hackthedex/emulator in the SD image. MelonDS does not
+                // reliably support runtime directory creation through its SD backend.
+#else
                 char dir_path[512];
-                snprintf(dir_path, sizeof(dir_path), "sd:/hackthedex/%s", timestamp_str);
-                mkdir(dir_path, 0777);
+                snprintf(dir_path, sizeof(dir_path), "%s/%s", ROOT_DIR, timestamp_str);
+
+                if (!ensure_directory(ROOT_DIR) || !ensure_directory(dir_path)) {
+                    continue;
+                }
+#endif
 
                 // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
                 show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
