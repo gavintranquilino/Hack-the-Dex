@@ -3,6 +3,6 @@
 
 #include <nds.h>
 
-void show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str);
+int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str);
 
 #endif
