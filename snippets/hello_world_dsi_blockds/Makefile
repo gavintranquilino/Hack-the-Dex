@@ -7,7 +7,7 @@ BLOCKSDS	?= /opt/blocksds/core
 # User config
 
 NAME		:= dsi_hello_world_blockds
-GAME_TITLE	:= Hello World DSi
+GAME_TITLE	:= Hello World DSi - Working!
 GAME_SUBTITLE	:= Gurt
 
 # Source code paths
