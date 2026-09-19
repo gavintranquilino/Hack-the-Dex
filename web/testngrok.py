@@ -1,8 +1,8 @@
 import socket
 
 # --- CHANGE THESE TO MATCH YOUR NGROK URL ---
-TARGET_HOST = "0.tcp.ngrok.io"
-TARGET_PORT = 14325  # Replace with your actual ngrok port
+TARGET_HOST = "4.tcp.ngrok.io"
+TARGET_PORT = 15145  # Replace with your actual ngrok port
 
 # The DSi sends exactly 256 x 192 = 49,152 bytes.
 # This creates a dummy array of 49,152 zeros (a solid black image).
