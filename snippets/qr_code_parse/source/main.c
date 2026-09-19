@@ -8,8 +8,8 @@
 #include <string.h>
 
 // Update these with your Ngrok TCP tunnel address
-#define TARGET_HOST "4.tcp.ngrok.io"
-#define TARGET_PORT "15145"
+#define TARGET_HOST "2.tcp.ngrok.io"
+#define TARGET_PORT "28248"
 #define WIFI_CONNECT_TIMEOUT_FRAMES (60 * 30)
 
 static void wait_forever(void) {
@@ -42,6 +42,35 @@ static int connect_to_wifi(void) {
     return 1;
 }
 
+static int read_full_response(int socket_fd, char *buffer, size_t buffer_size) {
+    uint32_t payload_len = 0;
+    int header_read = recv(socket_fd, &payload_len, sizeof(payload_len), 0);
+    if (header_read != sizeof(payload_len)) {
+        printf("No JSON response header received.\n");
+        return 0;
+    }
+
+    payload_len = ntohl(payload_len);
+    if (payload_len >= buffer_size) {
+        printf("JSON response too large for buffer: %u\n", payload_len);
+        return 0;
+    }
+
+    size_t total = 0;
+    while (total < payload_len) {
+        int received = recv(socket_fd, buffer + total, payload_len - total, 0);
+        if (received <= 0) {
+            printf("Failed reading JSON response body.\n");
+            return 0;
+        }
+        total += (size_t)received;
+    }
+
+    buffer[total] = '\0';
+    printf("Server JSON: %s\n", buffer);
+    return 1;
+}
+
 void sendFrameOverTCP(const uint8_t* buffer, size_t size) {
     struct addrinfo hints = {0};
     struct addrinfo *result = NULL;
@@ -66,28 +95,36 @@ void sendFrameOverTCP(const uint8_t* buffer, size_t size) {
     printf("Connecting to proxy...\n");
     if (connect(socket_fd, result->ai_addr, result->ai_addrlen) == 0) {
         printf("Connected! Streaming frame...\n");
-        
+
+        uint32_t network_size = htonl((uint32_t)size);
+        if (send(socket_fd, &network_size, sizeof(network_size), 0) < 0) {
+            printf("Failed to send frame length header.\n");
+            close(socket_fd);
+            freeaddrinfo(result);
+            return;
+        }
+
         size_t total_sent = 0;
         size_t chunk_size = 1024; // Send in safe 1KB blocks
-        
+
         while (total_sent < size) {
             size_t remaining = size - total_sent;
             size_t to_send = (remaining < chunk_size) ? remaining : chunk_size;
-            
+
             int sent = send(socket_fd, buffer + total_sent, to_send, 0);
             if (sent < 0) {
                 printf("Send error at byte %u\n", (unsigned int)total_sent);
                 break;
             }
-            
+
             total_sent += sent;
-            
-            // Allow background DSwifi stack time to process packets
             swiWaitForVBlank();
         }
-        
+
         if (total_sent == size) {
             printf("Payload sent successfully!\n");
+            char response[512];
+            read_full_response(socket_fd, response, sizeof(response));
         } else {
             printf("Send failed mid-transfer.\n");
         }

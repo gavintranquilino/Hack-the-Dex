@@ -30,6 +30,32 @@ CHROMIUM_PROFILE_DIR = os.path.join(
 ALLOWED_HOST = "my.hackthenorth.com"
 
 
+def recv_exact(conn, size, timeout_seconds=1.0):
+    conn.settimeout(timeout_seconds)
+    chunks = bytearray()
+
+    while len(chunks) < size:
+        try:
+            chunk = conn.recv(size - len(chunks))
+        except socket.timeout:
+            continue
+        if not chunk:
+            break
+        chunks.extend(chunk)
+
+    return bytes(chunks)
+
+
+def send_json_response(conn, log, payload):
+    response_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    frame = len(response_bytes).to_bytes(4, byteorder="big", signed=False) + response_bytes
+    try:
+        conn.sendall(frame)
+        log(f"-> Sent JSON response: {response_bytes.decode('utf-8')}")
+    except OSError as error:
+        log(f"-> Could not send JSON response: {error}")
+
+
 def create_server_socket(log):
     log(f"Starting DSi Proxy Server on port {SERVER_PORT}...")
 
@@ -58,21 +84,31 @@ def start_server(server_socket, stop_event, log, show_image, url_queue):
             with conn:
                 conn.settimeout(1.0)
                 log(f"Connection received from {addr}. Downloading frame...")
-                data = bytearray()
 
-                while len(data) < EXPECTED_BYTES and not stop_event.is_set():
-                    try:
-                        packet = conn.recv(EXPECTED_BYTES - len(data))
-                    except socket.timeout:
-                        continue
-                    if not packet:
-                        break
-                    data.extend(packet)
+                try:
+                    length_header = recv_exact(conn, 4, timeout_seconds=1.0)
+                except OSError:
+                    length_header = b""
 
-                if len(data) == EXPECTED_BYTES and not stop_event.is_set():
-                    process_frame(data, log, show_image, url_queue.put)
-                else:
+                if len(length_header) != 4:
+                    log("Error: Missing frame length header.")
+                    send_json_response(conn, log, {"status": "error", "message": "missing_length_header"})
+                    continue
+
+                frame_size = int.from_bytes(length_header, byteorder="big", signed=False)
+                if frame_size != EXPECTED_BYTES:
+                    log(f"Error: Unexpected frame size {frame_size}, expected {EXPECTED_BYTES}.")
+                    send_json_response(conn, log, {"status": "error", "message": "unexpected_frame_size", "expected": EXPECTED_BYTES, "got": frame_size})
+                    continue
+
+                data = recv_exact(conn, frame_size, timeout_seconds=1.0)
+                if len(data) != frame_size:
                     log(f"Error: Incomplete frame ({len(data)} bytes).")
+                    send_json_response(conn, log, {"status": "error", "message": "incomplete_frame"})
+                    continue
+
+                result = process_frame(data, log, show_image, url_queue.put)
+                send_json_response(conn, log, result)
 
 
 def process_frame(raw_bytes, log, show_image, open_url):
@@ -84,7 +120,7 @@ def process_frame(raw_bytes, log, show_image, open_url):
 
     if not decoded_objects:
         log("-> No QR code detected. Check dsi_capture.png for focus/lighting.")
-        return
+        return {"status": "error", "message": "no_qr_code_detected"}
 
     for obj in decoded_objects:
         qr_data = obj.data.decode("utf-8")
@@ -94,10 +130,24 @@ def process_frame(raw_bytes, log, show_image, open_url):
         if parsed_url.scheme in ("http", "https") and parsed_url.hostname == ALLOWED_HOST:
             log("-> Opening in browser...")
             open_url(qr_data)
+            return {
+                "status": "ok",
+                "message": "qr_accepted",
+                "url": qr_data,
+                "host": ALLOWED_HOST,
+            }
         elif parsed_url.hostname:
             log(f"-> Ignoring URL from unapproved host: {parsed_url.hostname}")
+            return {
+                "status": "error",
+                "message": "unapproved_host",
+                "host": parsed_url.hostname,
+            }
         else:
             log("-> Not a valid URL.")
+            return {"status": "error", "message": "invalid_url"}
+
+    return {"status": "error", "message": "qr_decode_failed"}
 
 
 def playwright_worker(url_queue, stop_event, log):
