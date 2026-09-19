@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import re
 import signal
 import socket
 import subprocess
@@ -12,6 +13,7 @@ from urllib.parse import urlsplit
 
 from PIL import Image, ImageTk
 from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 from pyzbar.pyzbar import decode
 
@@ -28,6 +30,10 @@ CHROMIUM_PROFILE_DIR = os.path.join(
     "hackthedex-chrome",
 )
 ALLOWED_HOST = "my.hackthenorth.com"
+DISCORD_BUTTON_XPATH = "/html/body/div/div/div[2]/div[2]/main/div/div/div[3]/button"
+PAGE_NAVIGATION_TIMEOUT_MS = 15_000
+PROFILE_RENDER_TIMEOUT_MS = 15_000
+PROFILE_RESPONSE_TIMEOUT_SECONDS = 40
 
 
 def recv_exact(conn, size, timeout_seconds=1.0):
@@ -44,6 +50,19 @@ def recv_exact(conn, size, timeout_seconds=1.0):
         chunks.extend(chunk)
 
     return bytes(chunks)
+
+
+def default_profile_payload():
+    return {
+        "name": "",
+        "pronouns": "",
+        "instagram": "",
+        "twitter": "",
+        "linkedin": "",
+        "discord": "goat",
+        "photo": "",
+        "signature": "",
+    }
 
 
 def send_json_response(conn, log, payload):
@@ -107,8 +126,125 @@ def start_server(server_socket, stop_event, log, show_image, url_queue):
                     send_json_response(conn, log, {"status": "error", "message": "incomplete_frame"})
                     continue
 
-                result = process_frame(data, log, show_image, url_queue.put)
-                send_json_response(conn, log, result)
+                response_queue = queue.Queue()
+
+                def open_url_with_response(url):
+                    url_queue.put({"url": url, "reply_queue": response_queue})
+
+                result = process_frame(data, log, show_image, open_url_with_response)
+                if result.get("status") == "ok":
+                    try:
+                        payload = response_queue.get(timeout=PROFILE_RESPONSE_TIMEOUT_SECONDS)
+                    except queue.Empty:
+                        payload = default_profile_payload()
+                else:
+                    payload = result
+
+                send_json_response(conn, log, payload)
+
+
+def extract_profile_payload(page):
+    def clean_text(value):
+        return re.sub(r"\s+", " ", (value or "")).strip()
+
+    # The profile is populated asynchronously. "INTERESTS" is part of the
+    # completed profile card, so waiting for it avoids reading the empty React
+    # root immediately after DOMContentLoaded.
+    interests_label = page.get_by_text("INTERESTS", exact=True)
+    interests_label.wait_for(state="visible", timeout=PROFILE_RENDER_TIMEOUT_MS)
+
+    # The name/pronouns header is the second sibling before the INTERESTS label:
+    # <div><p>name</p><div><p>(</p><p>pronouns</p><p>)</p></div></div>
+    profile_header = interests_label.locator("xpath=preceding-sibling::*[2]")
+    name = clean_text(profile_header.locator(":scope > p").first.text_content())
+
+    pronoun_group = profile_header.locator(":scope > div")
+    pronouns = clean_text(
+        pronoun_group.first.text_content() if pronoun_group.count() else ""
+    )
+    pronouns = re.sub(r"^\(\s*|\s*\)$", "", pronouns).strip()
+
+    paragraph_texts = [clean_text(text) for text in page.locator("p").all_text_contents()]
+    print(f"[DEBUG p elements] {[text for text in paragraph_texts if text]}")
+
+    # Read each attribute exactly as it appears in the DOM instead of deriving
+    # a username from the link text or from the resolved page URL.
+    social_hrefs = page.locator("a[href]").evaluate_all(
+        """
+        links => Object.fromEntries(
+            links.map(link => [
+                (link.textContent || '').trim().toLowerCase(),
+                link.getAttribute('href') || ''
+            ])
+        )
+        """
+    )
+    print(f"[DEBUG social hrefs] {social_hrefs}")
+
+    discord = ""
+    discord_button = page.locator(f"xpath={DISCORD_BUTTON_XPATH}")
+    if discord_button.count():
+        # Capture navigator.clipboard.writeText() without changing the user's
+        # actual clipboard. The Discord button's click handler passes the tag
+        # to this function even though the tag is not present in its DOM text.
+        page.evaluate(
+            """
+            () => {
+                const clipboard = navigator.clipboard;
+                window.__capturedDiscordTag = null;
+                window.__clipboardWriteTextDescriptor =
+                    Object.getOwnPropertyDescriptor(clipboard, 'writeText');
+                Object.defineProperty(clipboard, 'writeText', {
+                    configurable: true,
+                    value: value => {
+                        window.__capturedDiscordTag = String(value);
+                        return Promise.resolve();
+                    }
+                });
+            }
+            """
+        )
+        try:
+            discord_button.click()
+            page.wait_for_function(
+                "window.__capturedDiscordTag !== null",
+                timeout=2_000,
+            )
+            discord = clean_text(page.evaluate("window.__capturedDiscordTag"))
+        except PlaywrightTimeoutError:
+            print("[DEBUG discord] Button did not write to navigator.clipboard")
+        finally:
+            page.evaluate(
+                """
+                () => {
+                    const descriptor = window.__clipboardWriteTextDescriptor;
+                    if (descriptor) {
+                        Object.defineProperty(
+                            navigator.clipboard,
+                            'writeText',
+                            descriptor
+                        );
+                    } else {
+                        delete navigator.clipboard.writeText;
+                    }
+                    delete window.__capturedDiscordTag;
+                    delete window.__clipboardWriteTextDescriptor;
+                }
+                """
+            )
+    print(f"[DEBUG discord] {discord}")
+
+    payload = {
+        "name": name,
+        "pronouns": pronouns,
+        "instagram": social_hrefs.get("instagram", ""),
+        "twitter": social_hrefs.get("twitter", ""),
+        "linkedin": social_hrefs.get("linkedin", ""),
+        "discord": discord,
+        "photo": "",
+        "signature": "",
+    }
+    return payload
 
 
 def process_frame(raw_bytes, log, show_image, open_url):
@@ -201,16 +337,39 @@ def playwright_worker(url_queue, stop_event, log):
             try:
                 while not stop_event.is_set():
                     try:
-                        url = url_queue.get(timeout=0.25)
+                        item = url_queue.get(timeout=0.25)
                     except queue.Empty:
                         continue
 
+                    if isinstance(item, dict):
+                        url = item.get("url")
+                        reply_queue = item.get("reply_queue")
+                    else:
+                        url = item
+                        reply_queue = None
+
                     try:
                         page = context.pages[0] if context.pages else context.new_page()
-                        page.goto(url, wait_until="domcontentloaded")
-                        log("-> Page opened in Playwright. No page parsing is enabled yet.")
+                        page.goto(
+                            url,
+                            wait_until="domcontentloaded",
+                            timeout=PAGE_NAVIGATION_TIMEOUT_MS,
+                        )
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=5_000)
+                        except PlaywrightTimeoutError:
+                            # Analytics may keep connections open. The profile
+                            # marker wait below is the readiness check that
+                            # matters for extraction.
+                            pass
+                        payload = extract_profile_payload(page)
+                        log("-> Page opened in Playwright and profile data was extracted.")
+                        if reply_queue is not None:
+                            reply_queue.put(payload)
                     except PlaywrightError as error:
                         log(f"-> Could not open page: {error}")
+                        if reply_queue is not None:
+                            reply_queue.put(default_profile_payload())
             finally:
                 log("Disconnected from Chromium. The browser session remains open.")
     except PlaywrightError as error:
@@ -303,7 +462,15 @@ def run_app():
         else:
             log(f"-> Opening debug URL from host {parsed_url.hostname or 'unknown'}: {url}")
 
-        url_queue.put(url)
+        response_queue = queue.Queue()
+        url_queue.put({"url": url, "reply_queue": response_queue})
+
+        try:
+            payload = response_queue.get(timeout=PROFILE_RESPONSE_TIMEOUT_SECONDS)
+        except queue.Empty:
+            payload = default_profile_payload()
+
+        log(f"-> Manual profile payload: {json.dumps(payload, separators=(',', ':'))}")
 
     def show_image(image):
         try:
