@@ -4,3 +4,6 @@ build/
 *.nds
 *.dsi
 *.png
+
+.venv
+__pycache__
