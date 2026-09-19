@@ -10,6 +10,7 @@
 #define TARGET_HOST "google.com"
 #define TARGET_PORT "80"
 #define WIFI_CONNECT_TIMEOUT_FRAMES (60 * 30)
+#define HTTP_RESPONSE_BUFFER_SIZE 512
 
 static void wait_forever(void)
 {
@@ -50,6 +51,9 @@ static void ping_host(void)
     struct addrinfo *result = NULL;
     int socket_fd;
     u32 start_ticks;
+    char request[] = "GET / HTTP/1.0\r\nHost: google.com\r\nConnection: close\r\n\r\n";
+    char response[HTTP_RESPONSE_BUFFER_SIZE];
+    int received;
 
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -72,7 +76,21 @@ static void ping_host(void)
     start_ticks = cpuGetTiming();
     if (connect(socket_fd, result->ai_addr, result->ai_addrlen) == 0) {
         u32 elapsed_ms = timerTicks2msec(cpuGetTiming() - start_ticks);
-        printf("Success: TCP connection in %lu ms.\n", elapsed_ms);
+        printf("Connected in %lu ms.\n", elapsed_ms);
+        printf("Sending HTTP GET...\n");
+
+        if (send(socket_fd, request, strlen(request), 0) < 0) {
+            printf("Request send failed.\n");
+        } else {
+            received = recv(socket_fd, response, sizeof(response) - 1, 0);
+            if (received > 0) {
+                response[received] = '\0';
+                printf("Received %d bytes:\n", received);
+                printf("%.420s\n", response);
+            } else {
+                printf("No response received.\n");
+            }
+        }
     } else {
         printf("Connection to %s failed.\n", TARGET_HOST);
     }
