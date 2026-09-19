@@ -4,3 +4,8 @@ build/
 *.nds
 *.dsi
 *.png
+
+.venv
+
+web/.playwright-profile/
+__pycache__
