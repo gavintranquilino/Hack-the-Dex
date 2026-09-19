@@ -8,15 +8,26 @@ import threading
 import time
 import tkinter as tk
 import urllib.request
-import webbrowser
+from urllib.parse import urlsplit
 
 from PIL import Image, ImageTk
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
 from pyzbar.pyzbar import decode
 
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8080
 EXPECTED_BYTES = 256 * 192
 NGROK_API_URL = "http://127.0.0.1:4040/api/tunnels"
+PLAYWRIGHT_CDP_URL = "http://127.0.0.1:9222"
+CHROMIUM_PROFILE_DIR = os.path.join(
+    os.path.expanduser("~"),
+    "snap",
+    "chromium",
+    "common",
+    "hackthedex-chrome",
+)
+ALLOWED_HOST = "my.hackthenorth.com"
 
 
 def create_server_socket(log):
@@ -30,7 +41,7 @@ def create_server_socket(log):
     return server_socket
 
 
-def start_server(server_socket, stop_event, log, show_image):
+def start_server(server_socket, stop_event, log, show_image, url_queue):
     with server_socket:
         log("Waiting for Ngrok tunnel connection...")
 
@@ -59,12 +70,12 @@ def start_server(server_socket, stop_event, log, show_image):
                     data.extend(packet)
 
                 if len(data) == EXPECTED_BYTES and not stop_event.is_set():
-                    process_frame(data, log, show_image)
+                    process_frame(data, log, show_image, url_queue.put)
                 else:
                     log(f"Error: Incomplete frame ({len(data)} bytes).")
 
 
-def process_frame(raw_bytes, log, show_image):
+def process_frame(raw_bytes, log, show_image, open_url):
     image = Image.frombuffer("L", (256, 192), bytes(raw_bytes), "raw", "L", 0, 1)
     image.save("dsi_capture.png")
     show_image(image.copy())
@@ -79,11 +90,83 @@ def process_frame(raw_bytes, log, show_image):
         qr_data = obj.data.decode("utf-8")
         log(f"-> QR Code Found: {qr_data}")
 
-        if qr_data.startswith("http"):
+        parsed_url = urlsplit(qr_data)
+        if parsed_url.scheme in ("http", "https") and parsed_url.hostname == ALLOWED_HOST:
             log("-> Opening in browser...")
-            webbrowser.open(qr_data)
+            open_url(qr_data)
+        elif parsed_url.hostname:
+            log(f"-> Ignoring URL from unapproved host: {parsed_url.hostname}")
         else:
             log("-> Not a valid URL.")
+
+
+def playwright_worker(url_queue, stop_event, log):
+    try:
+        with sync_playwright() as playwright:
+            browser = None
+            chromium_process = None
+
+            try:
+                browser = playwright.chromium.connect_over_cdp(PLAYWRIGHT_CDP_URL)
+                log("Connected to the existing Chromium session over CDP.")
+            except PlaywrightError:
+                log("No Chromium CDP session found. Starting Chromium...")
+                os.makedirs(CHROMIUM_PROFILE_DIR, exist_ok=True)
+                try:
+                    chromium_process = subprocess.Popen(
+                        [
+                            "chromium",
+                            "--remote-debugging-port=9222",
+                            f"--user-data-dir={CHROMIUM_PROFILE_DIR}",
+                            f"https://{ALLOWED_HOST}",
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                except OSError as error:
+                    log(f"Could not start Chromium: {error}")
+                    return
+
+            while browser is None and not stop_event.is_set():
+                try:
+                    browser = playwright.chromium.connect_over_cdp(PLAYWRIGHT_CDP_URL)
+                except PlaywrightError:
+                    if chromium_process is not None and chromium_process.poll() is not None:
+                        log("Chromium exited before its CDP endpoint became ready.")
+                        return
+                    time.sleep(0.5)
+
+            if browser is None:
+                return
+
+            contexts = browser.contexts
+            if not contexts:
+                log("Connected to Chromium, but no browser context is available.")
+                return
+
+            context = contexts[0]
+            log("Connected to the authenticated Chromium session over CDP.")
+
+            try:
+                while not stop_event.is_set():
+                    try:
+                        url = url_queue.get(timeout=0.25)
+                    except queue.Empty:
+                        continue
+
+                    try:
+                        page = context.pages[0] if context.pages else context.new_page()
+                        page.goto(url, wait_until="domcontentloaded")
+                        log("-> Page opened in Playwright. No page parsing is enabled yet.")
+                    except PlaywrightError as error:
+                        log(f"-> Could not open page: {error}")
+            finally:
+                log("Disconnected from Chromium. The browser session remains open.")
+    except PlaywrightError as error:
+        log(f"Playwright error: {error}")
+    except Exception as error:
+        log(f"Could not start Playwright: {error}")
 
 
 def get_tcp_tunnel():
@@ -115,16 +198,18 @@ def stop_ngrok(ngrok_process):
 
 def run_app():
     log_queue = queue.Queue()
+    url_queue = queue.Queue()
     stop_event = threading.Event()
     ngrok_process = None
     server_thread = None
+    playwright_thread = None
     server_socket = None
     closing = False
 
     root = tk.Tk()
     root.title("DSi QR Scanner Connection")
-    root.geometry("650x500")
-    root.minsize(650, 500)
+    root.geometry("650x620")
+    root.minsize(650, 620)
     root.resizable(False, False)
 
     def log(message):
@@ -152,6 +237,24 @@ def run_app():
     preview_label = tk.Label(preview_frame, text="No frame yet", bg="black", fg="white")
     preview_label.pack(fill="both", expand=True)
 
+    def submit_manual_url():
+        url = manual_url_var.get().strip()
+        if not url:
+            log("-> No manual URL entered.")
+            return
+
+        parsed_url = urlsplit(url)
+        if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+            log("-> Enter a valid http or https URL.")
+            return
+
+        if parsed_url.hostname == ALLOWED_HOST:
+            log(f"-> Manual URL override: {url}")
+        else:
+            log(f"-> Opening debug URL from host {parsed_url.hostname or 'unknown'}: {url}")
+
+        url_queue.put(url)
+
     def show_image(image):
         try:
             root.after(0, update_preview, image)
@@ -166,12 +269,21 @@ def run_app():
         preview_label.image = preview_image
 
     log_frame = tk.Frame(root)
-    log_frame.pack(fill="both", expand=True, padx=32, pady=(0, 24))
-    log_output = tk.Text(log_frame, height=15, width=72, state="disabled", wrap="word")
+    log_frame.pack(fill="both", expand=True, padx=32, pady=(0, 8))
+    log_output = tk.Text(log_frame, height=12, width=72, state="disabled", wrap="word")
     log_scrollbar = tk.Scrollbar(log_frame, command=log_output.yview)
     log_output.configure(yscrollcommand=log_scrollbar.set)
     log_output.pack(side="left", fill="both", expand=True)
     log_scrollbar.pack(side="right", fill="y")
+
+    manual_frame = tk.Frame(root)
+    manual_frame.pack(fill="x", padx=32, pady=(0, 18))
+    manual_url_var = tk.StringVar(value="https://my.hackthenorth.com")
+    tk.Label(manual_frame, text="Manual URL:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 4))
+    manual_entry = tk.Entry(manual_frame, textvariable=manual_url_var, width=70)
+    manual_entry.pack(side="left", fill="x", expand=True)
+    tk.Button(manual_frame, text="Open URL", command=submit_manual_url).pack(side="left", padx=(10, 0))
+    manual_entry.bind("<Return>", lambda event: submit_manual_url())
 
     def update_log_output():
         try:
@@ -198,6 +310,8 @@ def run_app():
             server_socket.close()
         if server_thread is not None and server_thread.is_alive():
             server_thread.join(timeout=2)
+        if playwright_thread is not None and playwright_thread.is_alive():
+            playwright_thread.join(timeout=5)
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", close_app)
@@ -210,8 +324,19 @@ def run_app():
         root.mainloop()
         return
 
-    server_thread = threading.Thread(target=start_server, args=(server_socket, stop_event, log, show_image), daemon=True)
+    server_thread = threading.Thread(
+        target=start_server,
+        args=(server_socket, stop_event, log, show_image, url_queue),
+        daemon=True,
+    )
     server_thread.start()
+
+    playwright_thread = threading.Thread(
+        target=playwright_worker,
+        args=(url_queue, stop_event, log),
+        daemon=True,
+    )
+    playwright_thread.start()
 
     try:
         ngrok_process = subprocess.Popen(

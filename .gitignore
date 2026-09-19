@@ -6,4 +6,6 @@ build/
 *.png
 
 .venv
+
+web/.playwright-profile/
 __pycache__
