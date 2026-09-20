@@ -186,7 +186,7 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
         }
 
         if (keys_down & KEY_X) {
-            eraser_active != eraser_active;
+            eraser_active = !eraser_active;
             draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
         }
 
@@ -205,13 +205,17 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
         }
 
         if (keys_down & KEY_UP) {
-            size_idx = (size_idx + 1) % NUM_SIZES;
-            draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            if (size_idx < NUM_SIZES - 1) {
+                size_idx++;
+                draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            }
         }
 
         if (keys_down & KEY_DOWN) {
-            size_idx = (size_idx - 1 + NUM_SIZES) % NUM_SIZES;
-            draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            if (size_idx > 0) {
+                size_idx--;
+                draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            }
         }
 
         if (keys_down & KEY_A) {
