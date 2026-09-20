@@ -1,7 +1,9 @@
 import json
 import os
+import platform
 import queue
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -22,13 +24,27 @@ SERVER_PORT = 8080
 EXPECTED_BYTES = 256 * 192
 NGROK_API_URL = "http://127.0.0.1:4040/api/tunnels"
 PLAYWRIGHT_CDP_URL = "http://127.0.0.1:9222"
-CHROMIUM_PROFILE_DIR = os.path.join(
-    os.path.expanduser("~"),
-    "snap",
-    "chromium",
-    "common",
-    "hackthedex-chrome",
-)
+
+# 1. CROSS-PLATFORM: Setup a platform-appropriate application data directory
+if platform.system() == "Windows":
+    CHROMIUM_PROFILE_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+        "hackthedex-chrome"
+    )
+elif platform.system() == "Darwin":
+    CHROMIUM_PROFILE_DIR = os.path.join(
+        os.path.expanduser("~"),
+        "Library",
+        "Application Support",
+        "hackthedex-chrome"
+    )
+else:
+    CHROMIUM_PROFILE_DIR = os.path.join(
+        os.path.expanduser("~"),
+        ".config",
+        "hackthedex-chrome"
+    )
+
 ALLOWED_HOST = "my.hackthenorth.com"
 DISCORD_BUTTON_XPATH = "/html/body/div/div/div[2]/div[2]/main/div/div/div[3]/button"
 PAGE_NAVIGATION_TIMEOUT_MS = 15_000
@@ -160,14 +176,9 @@ def extract_profile_payload(page):
             username = path_parts[1].lstrip("@").strip() if len(path_parts) > 1 else ""
         return username
 
-    # The profile is populated asynchronously. "INTERESTS" is part of the
-    # completed profile card, so waiting for it avoids reading the empty React
-    # root immediately after DOMContentLoaded.
     interests_label = page.get_by_text("INTERESTS", exact=True)
     interests_label.wait_for(state="visible", timeout=PROFILE_RENDER_TIMEOUT_MS)
 
-    # The name/pronouns header is the second sibling before the INTERESTS label:
-    # <div><p>name</p><div><p>(</p><p>pronouns</p><p>)</p></div></div>
     profile_header = interests_label.locator("xpath=preceding-sibling::*[2]")
     name = clean_text(profile_header.locator(":scope > p").first.text_content())
 
@@ -180,8 +191,6 @@ def extract_profile_payload(page):
     paragraph_texts = [clean_text(text) for text in page.locator("p").all_text_contents()]
     print(f"[DEBUG p elements] {[text for text in paragraph_texts if text]}")
 
-    # Read each attribute exactly as it appears in the DOM instead of deriving
-    # a username from the link text or from the resolved page URL.
     social_hrefs = page.locator("a[href]").evaluate_all(
         """
         links => Object.fromEntries(
@@ -205,10 +214,8 @@ def extract_profile_payload(page):
             has=page.locator("[aria-label*='discord' i], [title*='discord' i]")
         ).first
     print(f"[DEBUG discord] candidate buttons={page.locator('button').count()}, selected={discord_button.count()}")
+    
     if discord_button.count():
-        # Capture navigator.clipboard.writeText() without changing the user's
-        # actual clipboard. The Discord button's click handler passes the tag
-        # to this function even though the tag is not present in its DOM text.
         try:
             page.evaluate(
                 """
@@ -315,6 +322,39 @@ def process_frame(raw_bytes, log, show_image, open_url):
     return {"status": "error", "message": "qr_decode_failed"}
 
 
+# 2. CROSS-PLATFORM: Dynamically locate the browser executable
+def get_browser_command():
+    if platform.system() == "Windows":
+        # Search for Chrome or Edge in common Windows locations if not in PATH
+        candidates = ["chrome", "msedge"]
+        common_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+        ]
+        for path in common_paths:
+            if os.path.isfile(path):
+                return path
+    elif platform.system() == "Darwin":
+        candidates = []
+        mac_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
+        ]
+        for path in mac_paths:
+            if os.path.isfile(path):
+                return path
+    else:
+        candidates = ["chromium-browser", "chromium", "google-chrome", "google-chrome-stable"]
+
+    for cmd in candidates:
+        if shutil.which(cmd):
+            return cmd
+
+    return "chromium"  # ultimate fallback
+
+
 def playwright_worker(url_queue, stop_event, log):
     try:
         with sync_playwright() as playwright:
@@ -327,10 +367,13 @@ def playwright_worker(url_queue, stop_event, log):
             except PlaywrightError:
                 log("No Chromium CDP session found. Starting Chromium...")
                 os.makedirs(CHROMIUM_PROFILE_DIR, exist_ok=True)
+                
+                browser_cmd = get_browser_command()
+                
                 try:
                     chromium_process = subprocess.Popen(
                         [
-                            "chromium",
+                            browser_cmd,
                             "--remote-debugging-port=9222",
                             f"--user-data-dir={CHROMIUM_PROFILE_DIR}",
                             f"https://{ALLOWED_HOST}",
@@ -387,9 +430,6 @@ def playwright_worker(url_queue, stop_event, log):
                         try:
                             page.wait_for_load_state("networkidle", timeout=5_000)
                         except PlaywrightTimeoutError:
-                            # Analytics may keep connections open. The profile
-                            # marker wait below is the readiness check that
-                            # matters for extraction.
                             pass
                         payload = extract_profile_payload(page)
                         log("-> Page opened in Playwright and profile data was extracted.")
@@ -420,17 +460,25 @@ def get_tcp_tunnel():
 
     return None
 
-
+# 3. CROSS-PLATFORM: Process group termination handler
 def stop_ngrok(ngrok_process):
     if ngrok_process is None or ngrok_process.poll() is not None:
         return
 
     try:
-        os.killpg(os.getpgid(ngrok_process.pid), signal.SIGTERM)
+        # os.killpg is POSIX only. Fallback to standard process terminate on Windows.
+        if os.name == 'posix':
+            os.killpg(os.getpgid(ngrok_process.pid), signal.SIGTERM)
+        else:
+            ngrok_process.terminate()
+            
         ngrok_process.wait(timeout=3)
-    except (ProcessLookupError, subprocess.TimeoutExpired):
+    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
         if ngrok_process.poll() is None:
-            os.killpg(os.getpgid(ngrok_process.pid), signal.SIGKILL)
+            if os.name == 'posix':
+                os.killpg(os.getpgid(ngrok_process.pid), signal.SIGKILL)
+            else:
+                ngrok_process.kill()
             ngrok_process.wait()
 
 
