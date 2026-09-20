@@ -12,9 +12,20 @@ GAME_SUBTITLE := Hack the North 2026 Project
 
 # Emulator build
 EMU ?= 0
+OFFLINE ?= 0
+
+SOURCEDIRS := source
+INCLUDEDIRS := include
 
 ifeq ($(EMU),1)
     CFLAGS += -DEMU
+    NAME := hack_the_dex_emu
+endif
+
+ifeq ($(OFFLINE),1)
+    NAME := hack_the_dex_offline
+    GAME_TITLE := Hack the Dex [Offline]
+    CFLAGS += -DOFFLINE
 endif
 
 # Libraries

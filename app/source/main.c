@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include "drawing.h"
 #include "setup_screen.h"
+#include "offline.h"
 
 
 #define MENU_VISIBLE_ROWS 5
@@ -106,6 +107,15 @@ static const u8 font5x7[64][8] = {
   {0x30,0x10,0x10,0x10,0x10,0x10,0x30,0x00}, // 93 ]
   {0x20,0x50,0x88,0x00,0x00,0x00,0x00,0x00}, // 94 ^
   {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF8}  // 95 _
+};
+
+// 5 extra characters to complete the standard ASCII set: ` { | } ~
+static const u8 special5x7[5][8] = {
+    {0x40, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // 96 `
+    {0x30, 0x40, 0x40, 0x80, 0x40, 0x40, 0x30, 0x00}, // 123 {
+    {0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00}, // 124 |
+    {0x60, 0x10, 0x10, 0x08, 0x10, 0x10, 0x60, 0x00}, // 125 }
+    {0x00, 0x00, 0x48, 0x90, 0x00, 0x00, 0x00, 0x00}  // 126 ~
 };
 
 
@@ -276,9 +286,21 @@ void print_text(const char* text, int x, int y, u16* screen, u16 color, int scal
     for (int i = 0; text[i] && x < 256; i++, x += 6 * scale) {
         unsigned char c = (unsigned char)text[i];
         if (c < 32 || c > 126) c = '?';
+        
         for (int ty = 0; ty < 8; ty++) {
-            u8 row = c >= 'a' && c <= 'z' ? (ty < 7 ? lowercase5x7[c - 'a'][ty] : 0) :
-                     font5x7[c <= 95 ? c - 32 : '?' - 32][ty];
+            u8 row;
+            if (c >= 'a' && c <= 'z') {
+                row = (ty < 7) ? lowercase5x7[c - 'a'][ty] : 0;
+            } else if (c <= 95) {
+                row = font5x7[c - 32][ty];
+            } else if (c == 96) {
+                row = special5x7[0][ty]; // `
+            } else if (c >= 123 && c <= 126) {
+                row = special5x7[c - 122][ty]; // { | } ~
+            } else {
+                row = font5x7['?' - 32][ty];
+            }
+
             for (int tx = 0; tx < 5; tx++) {
                 if (!(row & (1 << (7 - tx)))) continue;
                 for (int sy = 0; sy < scale; sy++) {
@@ -412,7 +434,11 @@ int main(int argc, char* argv[]) {
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
 
+#if !defined(OFFLINE) && !defined(EMU)
+
     show_setup_screen(top_vram, bottom_vram, &global_host_number, &global_port_number);
+
+#endif
 
     keysSetRepeat(25, 5); 
     load_users();
@@ -488,7 +514,18 @@ int main(int argc, char* argv[]) {
 #endif
 
                 // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
-                int status = show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
+                int status;
+
+#if defined(OFFLINE) || defined(EMU)
+
+                status = show_offline_credentials_screen(top_vram, bottom_vram, timestamp_str);
+
+#else
+
+                status = show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
+
+#endif // end of offline determination
+
 
                 if (status == 0) {
                     if (show_camera_capture(top_vram, bottom_vram, photo_path)) {

@@ -8,6 +8,7 @@
 #define CANVAS_WIDTH 256
 #define CANVAS_HEIGHT 192
 #define WHITE (RGB15(31, 31, 31) | BIT(15))
+
 // Clip every primitive to the physical DSi bitmap, including rounded corners.
 static void rounded_fill(u16* screen, int x, int y, int w, int h, int r, u16 color) {
     if (w <= 0 || h <= 0) return;
@@ -116,6 +117,10 @@ static void put_u32(unsigned char *p, uint32_t value) {
 }
 
 static bool save_bmp(const char *path, u16* canvas) {
+#ifdef EMU
+    // Bypassing file I/O completely on emulator to prevent DLDI write crashes.
+    return true;
+#else
     FILE *file = fopen(path, "wb");
     if (!file) return false;
 
@@ -155,6 +160,7 @@ static bool save_bmp(const char *path, u16* canvas) {
     bool ok = !ferror(file);
     if (fclose(file) != 0) ok = false;
     return ok;
+#endif
 }
 
 static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_active) {
