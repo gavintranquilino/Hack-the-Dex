@@ -1,0 +1,12 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^make -C app$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^make -C app/ && git diff --check$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

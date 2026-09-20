@@ -147,6 +147,19 @@ def extract_profile_payload(page):
     def clean_text(value):
         return re.sub(r"\s+", " ", (value or "")).strip()
 
+    def social_username(value, platform):
+        value = clean_text(value)
+        if not value:
+            return ""
+        parsed = urlsplit(value if "://" in value else f"https://{value}")
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if not path_parts:
+            return ""
+        username = path_parts[-1].lstrip("@").strip()
+        if platform == "linkedin" and path_parts[0].lower() == "in":
+            username = path_parts[1].lstrip("@").strip() if len(path_parts) > 1 else ""
+        return username
+
     # The profile is populated asynchronously. "INTERESTS" is part of the
     # completed profile card, so waiting for it avoids reading the empty React
     # root immediately after DOMContentLoaded.
@@ -183,66 +196,82 @@ def extract_profile_payload(page):
 
     discord = ""
     discord_button = page.locator(f"xpath={DISCORD_BUTTON_XPATH}")
+    if not discord_button.count():
+        discord_button = page.locator("button").filter(
+            has_text=re.compile(r"discord", re.IGNORECASE)
+        ).first
+    if not discord_button.count():
+        discord_button = page.locator("button").filter(
+            has=page.locator("[aria-label*='discord' i], [title*='discord' i]")
+        ).first
+    print(f"[DEBUG discord] candidate buttons={page.locator('button').count()}, selected={discord_button.count()}")
     if discord_button.count():
         # Capture navigator.clipboard.writeText() without changing the user's
         # actual clipboard. The Discord button's click handler passes the tag
         # to this function even though the tag is not present in its DOM text.
-        page.evaluate(
-            """
-            () => {
-                const clipboard = navigator.clipboard;
-                window.__capturedDiscordTag = null;
-                window.__clipboardWriteTextDescriptor =
-                    Object.getOwnPropertyDescriptor(clipboard, 'writeText');
-                Object.defineProperty(clipboard, 'writeText', {
-                    configurable: true,
-                    value: value => {
-                        window.__capturedDiscordTag = String(value);
-                        return Promise.resolve();
-                    }
-                });
-            }
-            """
-        )
         try:
+            page.evaluate(
+                """
+                () => {
+                    const clipboard = navigator.clipboard;
+                    if (!clipboard) throw new Error('navigator.clipboard unavailable');
+                    const prototype = Object.getPrototypeOf(clipboard);
+                    const ownDescriptor = Object.getOwnPropertyDescriptor(clipboard, 'writeText');
+                    const target = ownDescriptor ? clipboard : prototype;
+                    window.__capturedDiscordTag = null;
+                    window.__clipboardWriteTextTarget = target;
+                    window.__clipboardWriteTextDescriptor =
+                        Object.getOwnPropertyDescriptor(target, 'writeText');
+                    Object.defineProperty(target, 'writeText', {
+                        configurable: true,
+                        value: value => {
+                            window.__capturedDiscordTag = String(value);
+                            return Promise.resolve();
+                        }
+                    });
+                }
+                """
+            )
             discord_button.click()
             page.wait_for_function(
                 "window.__capturedDiscordTag !== null",
                 timeout=2_000,
             )
             discord = clean_text(page.evaluate("window.__capturedDiscordTag"))
-        except PlaywrightTimeoutError:
-            print("[DEBUG discord] Button did not write to navigator.clipboard")
+            print(f"[DEBUG discord] captured={discord!r}")
+        except (PlaywrightTimeoutError, PlaywrightError) as error:
+            print(f"[DEBUG discord] clipboard capture failed: {error}")
         finally:
-            page.evaluate(
-                """
-                () => {
-                    const descriptor = window.__clipboardWriteTextDescriptor;
-                    if (descriptor) {
-                        Object.defineProperty(
-                            navigator.clipboard,
-                            'writeText',
-                            descriptor
-                        );
-                    } else {
-                        delete navigator.clipboard.writeText;
+            try:
+                page.evaluate(
+                    """
+                    () => {
+                        const target = window.__clipboardWriteTextTarget;
+                        const descriptor = window.__clipboardWriteTextDescriptor;
+                        if (target && descriptor) {
+                            Object.defineProperty(target, 'writeText', descriptor);
+                        } else if (target) {
+                            delete target.writeText;
+                        }
+                        delete window.__capturedDiscordTag;
+                        delete window.__clipboardWriteTextTarget;
+                        delete window.__clipboardWriteTextDescriptor;
                     }
-                    delete window.__capturedDiscordTag;
-                    delete window.__clipboardWriteTextDescriptor;
-                }
-                """
-            )
+                    """
+                )
+            except PlaywrightError as error:
+                print(f"[DEBUG discord] clipboard restore failed: {error}")
     print(f"[DEBUG discord] {discord}")
 
     payload = {
         "name": name,
         "pronouns": pronouns,
-        "instagram": social_hrefs.get("instagram", ""),
-        "twitter": social_hrefs.get("twitter", ""),
-        "linkedin": social_hrefs.get("linkedin", ""),
+        "instagram": social_username(social_hrefs.get("instagram", ""), "instagram"),
+        "twitter": social_username(social_hrefs.get("twitter", ""), "twitter"),
+        "linkedin": social_username(social_hrefs.get("linkedin", ""), "linkedin"),
         "discord": discord,
-        "photo": "",
-        "signature": "",
+        "photo": "photo.bmp",
+        "signature": "signature.bmp",
     }
     return payload
 

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 #define GB_BG_COLOR   RGB15(17, 21, 1)
 #define GB_TEXT_COLOR RGB15(1, 7, 1)
@@ -132,21 +133,43 @@ typedef struct {
     bool camera_initialized;
     bool camera_ready;
     bool transfer_pending;
-    bool transfer_is_capture;
     bool capture_requested;
     bool frame_ready;
     bool cancelled;
+    bool select_requested;
     int transfer_frames;
+    char log_lines[6][64];
+    int log_count;
 } Scanner;
 
 static void scanner_status(Scanner *scanner, const char *message) {
     u16 *screen = scanner->bottom_vram;
     dmaFillHalfWords(GB_BG_COLOR | BIT(15), screen, FRAME_PIXELS * sizeof(u16));
-    print_string_embedded("NETWORK SETUP", 88, 24, screen);
-    print_string_embedded("ALIGN QR CODE ON TOP SCREEN", 50, 56, screen);
-    print_string_embedded(message, 8, 88, screen);
-    print_string_embedded("A: CAPTURE / RETRY", 76, 136, screen);
-    print_string_embedded("B: CANCEL", 100, 160, screen);
+    if (scanner->log_count < 6) {
+        snprintf(scanner->log_lines[scanner->log_count],
+                 sizeof(scanner->log_lines[scanner->log_count]), "%s", message);
+        scanner->log_count++;
+    } else {
+        for (int i = 1; i < 6; i++)
+            snprintf(scanner->log_lines[i - 1], sizeof(scanner->log_lines[i - 1]),
+                     "%s", scanner->log_lines[i]);
+        snprintf(scanner->log_lines[5], sizeof(scanner->log_lines[5]), "%s", message);
+    }
+    print_string_embedded("NETWORK SETUP", 88, 8, screen);
+    print_string_embedded("ALIGN QR CODE ON TOP SCREEN", 50, 20, screen);
+    for (int i = 0; i < scanner->log_count; i++)
+        print_string_embedded(scanner->log_lines[i], 4, 40 + i * 16, screen);
+    print_string_embedded("A: CAPTURE / RETRY", 76, 152, screen);
+    print_string_embedded("B: CANCEL", 100, 168, screen);
+}
+
+static void scanner_statusf(Scanner *scanner, const char *format, ...) {
+    char message[64];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    scanner_status(scanner, message);
 }
 
 static void stop_camera(Scanner *scanner) {
@@ -159,7 +182,6 @@ static void stop_camera(Scanner *scanner) {
     scanner->camera_initialized = false;
     scanner->camera_ready = false;
     scanner->transfer_pending = false;
-    scanner->transfer_is_capture = false;
     scanner->capture_requested = false;
     scanner->frame_ready = false;
 }
@@ -176,8 +198,15 @@ static bool start_camera(Scanner *scanner) {
         return false;
     }
     scanner->camera_ready = true;
-    scanner_status(scanner, "READY. PRESS A TO SCAN");
+    scanner_status(scanner, "CAMERA READY. PRESS A");
     return true;
+}
+
+static void restart_camera(Scanner *scanner, const char *reason) {
+    stop_camera(scanner);
+    scanner_status(scanner, reason);
+    if (!scanner->cancelled)
+        start_camera(scanner);
 }
 
 static void update_preview(Scanner *scanner) {
@@ -185,25 +214,26 @@ static void update_preview(Scanner *scanner) {
         return;
 
     if (scanner->transfer_pending) {
-        // Match the camera preview loop: NDMA completion is the frame
-        // boundary, while the camera enable bit may remain set for preview.
+        if (scanner->capture_requested) {
+            // The reference app captures the buffer produced by the previous
+            // preview transfer. Waiting for NDMA here can strand the first
+            // transfer on hardware, so stop it at the next VBlank instead.
+            cameraStopTransfer();
+            scanner->transfer_pending = false;
+            scanner->capture_requested = false;
+            scanner->frame_ready = true;
+            scanner_status(scanner, "FRAME READY. SENDING");
+            return;
+        }
+
+        // Match the QR app and continuously schedule preview transfers.
         if (ndmaBusy(CAMERA_NDMA_CHANNEL) && cameraTransferActive()) {
             if (++scanner->transfer_frames >= CAMERA_TIMEOUT_FRAMES) {
-                stop_camera(scanner);
-                scanner_status(scanner, "CAMERA TIMED OUT. A TO RETRY");
+                restart_camera(scanner, "CAMERA TIMEOUT. RESETTING");
             }
             return;
         }
-        if (REG_CAM_CNT & CAM_CNT_TRANSFER_ERROR) {
-            stop_camera(scanner);
-            scanner_status(scanner, "CAMERA ERROR. A TO RETRY");
-            return;
-        }
         scanner->transfer_pending = false;
-        if (scanner->transfer_is_capture) {
-            scanner->transfer_is_capture = false;
-            scanner->frame_ready = true;
-        }
     }
 
     // Freeze only long enough to convert the completed capture to grayscale.
@@ -211,12 +241,9 @@ static void update_preview(Scanner *scanner) {
         if (!cameraStartTransfer(scanner->top_vram,
                                  MCUREG_APT_SEQ_CMD_PREVIEW,
                                  CAMERA_NDMA_CHANNEL)) {
-            stop_camera(scanner);
-            scanner_status(scanner, "CAMERA FAILED. A TO RETRY");
+            restart_camera(scanner, "CAMERA START FAILED. RESETTING");
             return;
         }
-        scanner->transfer_is_capture = scanner->capture_requested;
-        scanner->capture_requested = false;
         scanner->transfer_pending = true;
         scanner->transfer_frames = 0;
     }
@@ -227,71 +254,47 @@ static void update_preview(Scanner *scanner) {
 static bool scanner_wait(Scanner *scanner) {
     swiWaitForVBlank();
     scanKeys();
+    if (keysDown() & KEY_SELECT)
+        scanner->select_requested = true;
     if (keysHeld() & KEY_B)
         scanner->cancelled = true;
     update_preview(scanner);
-    return !scanner->cancelled;
+    return !scanner->cancelled && !scanner->select_requested;
 }
 
 static bool connect_wifi(Scanner *scanner) {
-    scanner_status(scanner, "CONNECTING TO WI-FI...");
+    scanner_status(scanner, "WI-FI TARGET SAVED SETTINGS");
     if (!Wifi_CheckInit() &&
-        !Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE)) {
-        scanner_status(scanner, "WI-FI INIT FAILED. A TO RETRY");
+        !Wifi_InitDefault(WFC_CONNECT | WIFI_ATTEMPT_DSI_MODE)) {
+        scanner_statusf(scanner, "WI-FI INIT FAILED E=%d", errno);
         return false;
     }
-    if (Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED)
+    int status = Wifi_AssocStatus();
+    scanner_statusf(scanner, "WI-FI STATUS %d", status);
+    if (status == ASSOCSTATUS_ASSOCIATED) {
+        scanner_status(scanner, "WI-FI ASSOCIATED");
         return true;
+    }
 
     Wifi_AutoConnect();
     for (int frames = 0; frames < WIFI_TIMEOUT_FRAMES; frames++) {
         if (!scanner_wait(scanner))
             return false;
-        int status = Wifi_AssocStatus();
+        status = Wifi_AssocStatus();
         if (status == ASSOCSTATUS_ASSOCIATED)
+        {
+            scanner_status(scanner, "WI-FI ASSOCIATED");
             return true;
+        }
         if (status == ASSOCSTATUS_CANNOTCONNECT)
             break;
     }
-    Wifi_DisconnectAP();
-    scanner_status(scanner, "WI-FI FAILED. A TO RETRY");
+    scanner_statusf(scanner, "WI-FI FAILED S=%d", status);
     return false;
 }
 
 static bool socket_pending(void) {
     return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
-}
-
-static bool connect_socket(Scanner *scanner, int fd,
-                           const struct addrinfo *address) {
-    if (connect(fd, address->ai_addr, address->ai_addrlen) == 0)
-        return true;
-    if (errno != EINPROGRESS && errno != EALREADY && !socket_pending())
-        return false;
-
-    for (int frames = 0; frames < NETWORK_TIMEOUT_FRAMES; frames++) {
-        if (!scanner_wait(scanner))
-            return false;
-        fd_set writable, errors;
-        FD_ZERO(&writable);
-        FD_ZERO(&errors);
-        FD_SET(fd, &writable);
-        FD_SET(fd, &errors);
-        struct timeval timeout = {0, 0};
-        int ready = select(fd + 1, NULL, &writable, &errors, &timeout);
-        if (ready < 0) {
-            if (errno == EINTR)
-                continue;
-            return false;
-        }
-        if (ready > 0) {
-            int error = 0;
-            socklen_t size = sizeof(error);
-            return getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0 &&
-                   error == 0 && FD_ISSET(fd, &writable);
-        }
-    }
-    return false;
 }
 
 // TCP can split even the four-byte length header across multiple reads/writes.
@@ -310,12 +313,24 @@ static bool transfer_exact(Scanner *scanner, int fd, void *buffer,
         if (count > 0) {
             total += (size_t)count;
             idle_frames = 0;
-        } else if (count == 0 || !socket_pending()) {
+        } else if (count == 0) {
+            scanner_statusf(scanner, "%s CLOSED AT %lu/%lu",
+                            sending ? "SEND" : "RECV",
+                            (unsigned long)total, (unsigned long)length);
+            return false;
+        } else if (!socket_pending()) {
+            scanner_statusf(scanner, "%s FAILED AT %lu E=%d",
+                            sending ? "SEND" : "RECV",
+                            (unsigned long)total, errno);
             return false;
         } else {
             idle_frames++;
         }
     }
+    if (total != length)
+        scanner_statusf(scanner, "%s TIMEOUT AT %lu/%lu",
+                        sending ? "SEND" : "RECV",
+                        (unsigned long)total, (unsigned long)length);
     return total == length;
 }
 
@@ -362,7 +377,32 @@ static bool save_profile(const char *json_path, const char *response, size_t len
     return false;
 }
 
+static bool save_dummy_profile(const char *json_path, const char *timestamp_str) {
+    char dummy_profile[512];
+    int length = snprintf(
+        dummy_profile, sizeof(dummy_profile),
+        "{\n"
+        "  \"name\": \"Who Knows %s\",\n"
+        "  \"pronouns\": \"?\",\n"
+        "  \"instagram\": \"@testuser\",\n"
+        "  \"discord\": \"test\",\n"
+        "  \"linkedin\": \"test\",\n"
+        "  \"twitter\": \"the goat\",\n"
+        "  \"photo\": \"photo.bmp\",\n"
+        "  \"signature\": \"signature.bmp\"\n"
+        "}\n",
+        timestamp_str ? timestamp_str : "TEST");
+    return length >= 0 && (size_t)length < sizeof(dummy_profile) &&
+           save_profile(json_path, dummy_profile, (size_t)length);
+}
+
 static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
+    // Network waits are blocking; leave the camera in a known idle state and
+    // restart it after a failed request instead of timing out its old DMA.
+    if (scanner->camera_ready) {
+        stop_camera(scanner);
+        scanner_status(scanner, "CAMERA STOPPED FOR NETWORK");
+    }
     if (!connect_wifi(scanner))
         return false;
 
@@ -375,32 +415,40 @@ static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    scanner_status(scanner, "RESOLVING SERVER...");
-    // DSWiFi's resolver is synchronous; all socket I/O below is nonblocking.
-    if (getaddrinfo(TARGET_HOST, TARGET_PORT, &hints, &address) != 0)
+    scanner_statusf(scanner, "DNS %s:%s", TARGET_HOST, TARGET_PORT);
+    if (getaddrinfo(TARGET_HOST, TARGET_PORT, &hints, &address) != 0) {
+        scanner_statusf(scanner, "DNS FAILED E=%d", errno);
         goto done;
+    }
+    scanner_status(scanner, "DNS RESOLVED");
     if (!scanner_wait(scanner))
         goto done;
     fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-    if (fd < 0)
+    if (fd < 0) {
+        scanner_statusf(scanner, "SOCKET FAILED E=%d", errno);
         goto done;
-    int nonblocking = 1;
-    if (ioctl(fd, FIONBIO, &nonblocking) < 0)
+    }
+    scanner_status(scanner, "TCP CONNECTING");
+    if (connect(fd, address->ai_addr, address->ai_addrlen) != 0) {
+        scanner_statusf(scanner, "TCP FAILED E=%d", errno);
         goto done;
-    scanner_status(scanner, "CONNECTING TO SERVER...");
-    if (!connect_socket(scanner, fd, address))
-        goto done;
+    }
+    scanner_status(scanner, "TCP CONNECTED");
 
     scanner_status(scanner, "SENDING CAPTURE...");
     uint32_t length = htonl(FRAME_PIXELS);
-    if (!transfer_exact(scanner, fd, &length, sizeof(length), true) ||
-        !transfer_exact(scanner, fd, grayscale, FRAME_PIXELS, true))
+    if (!transfer_exact(scanner, fd, &length, sizeof(length), true))
         goto done;
+    scanner_status(scanner, "HEADER SENT");
+    if (!transfer_exact(scanner, fd, grayscale, FRAME_PIXELS, true))
+        goto done;
+    scanner_status(scanner, "FRAME SENT. WAITING");
 
     scanner_status(scanner, "WAITING FOR PROFILE...");
     if (!transfer_exact(scanner, fd, &length, sizeof(length), false))
         goto done;
     length = ntohl(length);
+    scanner_statusf(scanner, "RESPONSE BYTES %lu", (unsigned long)length);
     error = "INVALID RESPONSE. A TO RETRY";
     if (length == 0 || length > MAX_PROFILE_BYTES)
         goto done;
@@ -412,6 +460,7 @@ static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
     if (!transfer_exact(scanner, fd, response, length, false))
         goto done;
     response[length] = '\0';
+    scanner_status(scanner, "PROFILE RECEIVED");
     error = "NO VALID PROFILE. A TO RETRY";
     if (!valid_profile(response, length))
         goto done;
@@ -448,15 +497,52 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
     bool usable = grayscale && path_length >= 0 && (size_t)path_length < sizeof(json_path);
 
     dmaFillHalfWords(GB_BG_COLOR | BIT(15), top_vram, FRAME_PIXELS * sizeof(u16));
-    if (usable)
-        start_camera(&scanner);
-    else
+    if (usable) {
+        if (Wifi_CheckInit()) {
+            scanner_status(&scanner, "RESETTING WI-FI...");
+            Wifi_DisconnectAP();
+            int wifi_status = Wifi_AssocStatus();
+            for (int frames = 0;
+                 wifi_status != ASSOCSTATUS_DISCONNECTED && frames < 60;
+                 frames++) {
+                swiWaitForVBlank();
+                wifi_status = Wifi_AssocStatus();
+            }
+            if (wifi_status != ASSOCSTATUS_DISCONNECTED) {
+                scanner_statusf(&scanner, "WI-FI RELEASE FAILED S=%d", wifi_status);
+                scanner.cancelled = true;
+            }
+            if (!scanner.cancelled) {
+                Wifi_DisableWifi();
+                swiWaitForVBlank();
+                swiWaitForVBlank();
+                if (!Wifi_Deinit()) {
+                    scanner_status(&scanner, "WI-FI RESET FAILED");
+                    scanner.cancelled = true;
+                }
+            }
+        }
+        if (!scanner.cancelled &&
+            !Wifi_InitDefault(WFC_CONNECT | WIFI_ATTEMPT_DSI_MODE))
+            scanner_statusf(&scanner, "WI-FI INIT FAILED E=%d", errno);
+        else if (!scanner.cancelled && connect_wifi(&scanner))
+            start_camera(&scanner);
+    }
+    if (usable && !scanner.camera_ready && !scanner.cancelled)
+        scanner_status(&scanner, "WI-FI FAILED. A TO RETRY");
+    if (!usable)
         scanner_status(&scanner, "SCANNER UNAVAILABLE. B TO CANCEL");
 
     while (!scanner.cancelled) {
         swiWaitForVBlank();
         scanKeys();
         int held = keysHeld();
+        if (keysDown() & KEY_SELECT) {
+            scanner.select_requested = true;
+            if (save_dummy_profile(json_path, timestamp_str))
+                result = 0;
+            break;
+        }
         if (held & KEY_B) {
             scanner.cancelled = true;
             break;
@@ -489,13 +575,18 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
             result = 0;
             break;
         }
+        if (scanner.select_requested) {
+            if (save_dummy_profile(json_path, timestamp_str))
+                result = 0;
+            break;
+        }
+        if (usable && !scanner.camera_ready && !scanner.cancelled)
+            start_camera(&scanner);
         // A held during the request cannot queue an automatic retry.
         a_released = false;
     }
 
     stop_camera(&scanner);
-    if (Wifi_CheckInit())
-        Wifi_DisconnectAP();
     free(grayscale);
     return result;
 }
