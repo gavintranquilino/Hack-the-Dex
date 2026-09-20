@@ -1,4 +1,11 @@
 #include "network_connection.h"
+#include "cJSON.h"
+#include <dswifi9.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +14,17 @@
 #define GB_BG_COLOR   RGB15(17, 21, 1)
 #define GB_TEXT_COLOR RGB15(1, 7, 1)
 #define ROOT_DIR "sd:/hackthedex"
+
+// Keep the endpoint and wire format in sync with qr_code_parse.
+#define TARGET_HOST "2.tcp.ngrok.io"
+#define TARGET_PORT "28248"
+#define FRAME_PIXELS (256 * 192)
+#define CAMERA_NDMA_CHANNEL 1
+#define CAMERA_TIMEOUT_FRAMES (60 * 3)
+#define WIFI_TIMEOUT_FRAMES (60 * 30)
+// web/main.py can spend 40 seconds retrieving the profile.
+#define NETWORK_TIMEOUT_FRAMES (60 * 60)
+#define MAX_PROFILE_BYTES (16 * 1024)
 
 #ifdef EMU
 #define PROFILE_DIR ROOT_DIR "/emulator"
@@ -108,86 +126,376 @@ static void print_string_embedded(const char* str, int x, int y, u16* offscreen)
     }
 }
 
+typedef struct {
+    u16 *top_vram;
+    u16 *bottom_vram;
+    bool camera_initialized;
+    bool camera_ready;
+    bool transfer_pending;
+    bool transfer_is_capture;
+    bool capture_requested;
+    bool frame_ready;
+    bool cancelled;
+    int transfer_frames;
+} Scanner;
+
+static void scanner_status(Scanner *scanner, const char *message) {
+    u16 *screen = scanner->bottom_vram;
+    dmaFillHalfWords(GB_BG_COLOR | BIT(15), screen, FRAME_PIXELS * sizeof(u16));
+    print_string_embedded("NETWORK SETUP", 88, 24, screen);
+    print_string_embedded("ALIGN QR CODE ON TOP SCREEN", 50, 56, screen);
+    print_string_embedded(message, 8, 88, screen);
+    print_string_embedded("A: CAPTURE / RETRY", 76, 136, screen);
+    print_string_embedded("B: CANCEL", 100, 160, screen);
+}
+
+static void stop_camera(Scanner *scanner) {
+    if (scanner->camera_initialized) {
+        // Abort DMA before returning VRAM ownership to the caller.
+        REG_NDMA_CR(CAMERA_NDMA_CHANNEL) = 0;
+        cameraStopTransfer();
+        cameraDeinit();
+    }
+    scanner->camera_initialized = false;
+    scanner->camera_ready = false;
+    scanner->transfer_pending = false;
+    scanner->transfer_is_capture = false;
+    scanner->capture_requested = false;
+    scanner->frame_ready = false;
+}
+
+static bool start_camera(Scanner *scanner) {
+    if (!isDSiMode()) {
+        scanner_status(scanner, "A DSI CAMERA IS REQUIRED");
+        return false;
+    }
+    scanner->camera_initialized = cameraInit();
+    if (!scanner->camera_initialized || !cameraSelect(CAMERA_OUTER)) {
+        stop_camera(scanner);
+        scanner_status(scanner, "CAMERA FAILED. A TO RETRY");
+        return false;
+    }
+    scanner->camera_ready = true;
+    scanner_status(scanner, "READY. PRESS A TO SCAN");
+    return true;
+}
+
+static void update_preview(Scanner *scanner) {
+    if (!scanner->camera_ready || scanner->cancelled)
+        return;
+
+    if (scanner->transfer_pending) {
+        // Match the camera preview loop: NDMA completion is the frame
+        // boundary, while the camera enable bit may remain set for preview.
+        if (ndmaBusy(CAMERA_NDMA_CHANNEL) && cameraTransferActive()) {
+            if (++scanner->transfer_frames >= CAMERA_TIMEOUT_FRAMES) {
+                stop_camera(scanner);
+                scanner_status(scanner, "CAMERA TIMED OUT. A TO RETRY");
+            }
+            return;
+        }
+        if (REG_CAM_CNT & CAM_CNT_TRANSFER_ERROR) {
+            stop_camera(scanner);
+            scanner_status(scanner, "CAMERA ERROR. A TO RETRY");
+            return;
+        }
+        scanner->transfer_pending = false;
+        if (scanner->transfer_is_capture) {
+            scanner->transfer_is_capture = false;
+            scanner->frame_ready = true;
+        }
+    }
+
+    // Freeze only long enough to convert the completed capture to grayscale.
+    if (!scanner->frame_ready) {
+        if (!cameraStartTransfer(scanner->top_vram,
+                                 MCUREG_APT_SEQ_CMD_PREVIEW,
+                                 CAMERA_NDMA_CHANNEL)) {
+            stop_camera(scanner);
+            scanner_status(scanner, "CAMERA FAILED. A TO RETRY");
+            return;
+        }
+        scanner->transfer_is_capture = scanner->capture_requested;
+        scanner->capture_requested = false;
+        scanner->transfer_pending = true;
+        scanner->transfer_frames = 0;
+    }
+}
+
+// Network waits keep servicing the preview and the cancel button. A presses
+// during an outstanding request are deliberately ignored.
+static bool scanner_wait(Scanner *scanner) {
+    swiWaitForVBlank();
+    scanKeys();
+    if (keysHeld() & KEY_B)
+        scanner->cancelled = true;
+    update_preview(scanner);
+    return !scanner->cancelled;
+}
+
+static bool connect_wifi(Scanner *scanner) {
+    scanner_status(scanner, "CONNECTING TO WI-FI...");
+    if (!Wifi_CheckInit() &&
+        !Wifi_InitDefault(INIT_ONLY | WIFI_ATTEMPT_DSI_MODE)) {
+        scanner_status(scanner, "WI-FI INIT FAILED. A TO RETRY");
+        return false;
+    }
+    if (Wifi_AssocStatus() == ASSOCSTATUS_ASSOCIATED)
+        return true;
+
+    Wifi_AutoConnect();
+    for (int frames = 0; frames < WIFI_TIMEOUT_FRAMES; frames++) {
+        if (!scanner_wait(scanner))
+            return false;
+        int status = Wifi_AssocStatus();
+        if (status == ASSOCSTATUS_ASSOCIATED)
+            return true;
+        if (status == ASSOCSTATUS_CANNOTCONNECT)
+            break;
+    }
+    Wifi_DisconnectAP();
+    scanner_status(scanner, "WI-FI FAILED. A TO RETRY");
+    return false;
+}
+
+static bool socket_pending(void) {
+    return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+}
+
+static bool connect_socket(Scanner *scanner, int fd,
+                           const struct addrinfo *address) {
+    if (connect(fd, address->ai_addr, address->ai_addrlen) == 0)
+        return true;
+    if (errno != EINPROGRESS && errno != EALREADY && !socket_pending())
+        return false;
+
+    for (int frames = 0; frames < NETWORK_TIMEOUT_FRAMES; frames++) {
+        if (!scanner_wait(scanner))
+            return false;
+        fd_set writable, errors;
+        FD_ZERO(&writable);
+        FD_ZERO(&errors);
+        FD_SET(fd, &writable);
+        FD_SET(fd, &errors);
+        struct timeval timeout = {0, 0};
+        int ready = select(fd + 1, NULL, &writable, &errors, &timeout);
+        if (ready < 0) {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (ready > 0) {
+            int error = 0;
+            socklen_t size = sizeof(error);
+            return getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0 &&
+                   error == 0 && FD_ISSET(fd, &writable);
+        }
+    }
+    return false;
+}
+
+// TCP can split even the four-byte length header across multiple reads/writes.
+static bool transfer_exact(Scanner *scanner, int fd, void *buffer,
+                           size_t length, bool sending) {
+    size_t total = 0;
+    int idle_frames = 0;
+    while (total < length && idle_frames < NETWORK_TIMEOUT_FRAMES) {
+        if (!scanner_wait(scanner))
+            return false;
+        size_t chunk = length - total;
+        if (chunk > 1024)
+            chunk = 1024;
+        int count = sending ? send(fd, (u8 *)buffer + total, chunk, 0)
+                            : recv(fd, (u8 *)buffer + total, chunk, 0);
+        if (count > 0) {
+            total += (size_t)count;
+            idle_frames = 0;
+        } else if (count == 0 || !socket_pending()) {
+            return false;
+        } else {
+            idle_frames++;
+        }
+    }
+    return total == length;
+}
+
+static bool valid_profile(const char *response, size_t length) {
+    // Reject embedded NULs and trailing non-JSON data, without reserializing.
+    if (memchr(response, '\0', length))
+        return false;
+    cJSON *profile = cJSON_ParseWithLengthOpts(response, length + 1, NULL, true);
+    bool valid = cJSON_IsObject(profile) &&
+                 !cJSON_GetObjectItemCaseSensitive(profile, "status");
+    static const char *fields[] = {
+        "name", "pronouns", "instagram", "twitter", "linkedin", "discord",
+        "photo", "signature"
+    };
+    for (size_t i = 0; valid && i < sizeof(fields) / sizeof(fields[0]); i++) {
+        valid = cJSON_IsString(cJSON_GetObjectItemCaseSensitive(profile, fields[i]));
+    }
+    if (valid) {
+        const char *name = cJSON_GetObjectItemCaseSensitive(profile, "name")->valuestring;
+        while (*name && isspace((unsigned char)*name))
+            name++;
+        // The server's extraction-failure fallback has an empty name.
+        valid = *name != '\0';
+    }
+    cJSON_Delete(profile);
+    return valid;
+}
+
+static bool save_profile(const char *json_path, const char *response, size_t length) {
+    // Do not expose a partial profile to main.c, or truncate a previous profile.
+    char temporary_path[520];
+    int count = snprintf(temporary_path, sizeof(temporary_path), "%s.tmp", json_path);
+    if (count < 0 || (size_t)count >= sizeof(temporary_path))
+        return false;
+    FILE *file = fopen(temporary_path, "wb");
+    if (!file)
+        return false;
+    bool saved = fwrite(response, 1, length, file) == length;
+    if (fclose(file) != 0)
+        saved = false;
+    if (saved && rename(temporary_path, json_path) == 0)
+        return true;
+    remove(temporary_path);
+    return false;
+}
+
+static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
+    if (!connect_wifi(scanner))
+        return false;
+
+    struct addrinfo hints = {0};
+    struct addrinfo *address = NULL;
+    int fd = -1;
+    char *response = NULL;
+    bool saved = false;
+    const char *error = "NETWORK FAILED. A TO RETRY";
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    scanner_status(scanner, "RESOLVING SERVER...");
+    // DSWiFi's resolver is synchronous; all socket I/O below is nonblocking.
+    if (getaddrinfo(TARGET_HOST, TARGET_PORT, &hints, &address) != 0)
+        goto done;
+    if (!scanner_wait(scanner))
+        goto done;
+    fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
+    if (fd < 0)
+        goto done;
+    int nonblocking = 1;
+    if (ioctl(fd, FIONBIO, &nonblocking) < 0)
+        goto done;
+    scanner_status(scanner, "CONNECTING TO SERVER...");
+    if (!connect_socket(scanner, fd, address))
+        goto done;
+
+    scanner_status(scanner, "SENDING CAPTURE...");
+    uint32_t length = htonl(FRAME_PIXELS);
+    if (!transfer_exact(scanner, fd, &length, sizeof(length), true) ||
+        !transfer_exact(scanner, fd, grayscale, FRAME_PIXELS, true))
+        goto done;
+
+    scanner_status(scanner, "WAITING FOR PROFILE...");
+    if (!transfer_exact(scanner, fd, &length, sizeof(length), false))
+        goto done;
+    length = ntohl(length);
+    error = "INVALID RESPONSE. A TO RETRY";
+    if (length == 0 || length > MAX_PROFILE_BYTES)
+        goto done;
+    response = malloc(length + 1);
+    if (!response) {
+        error = "OUT OF MEMORY. A TO RETRY";
+        goto done;
+    }
+    if (!transfer_exact(scanner, fd, response, length, false))
+        goto done;
+    response[length] = '\0';
+    error = "NO VALID PROFILE. A TO RETRY";
+    if (!valid_profile(response, length))
+        goto done;
+    if (!scanner_wait(scanner))
+        goto done;
+    scanner_status(scanner, "SAVING PROFILE...");
+    saved = save_profile(json_path, response, length);
+    error = "SAVE FAILED. A TO RETRY";
+
+done:
+    free(response);
+    if (fd >= 0)
+        close(fd);
+    if (address)
+        freeaddrinfo(address);
+    if (!saved && !scanner->cancelled)
+        scanner_status(scanner, error);
+    return saved;
+}
+
 int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str) {
-    // 1. Write the profile.json inside the timestamp folder
     char json_path[512];
 #ifdef EMU
-    snprintf(json_path, sizeof(json_path), "%s/profile.json", PROFILE_DIR);
+    (void)timestamp_str;
+    int path_length = snprintf(json_path, sizeof(json_path), "%s/profile.json", PROFILE_DIR);
 #else
-    snprintf(json_path, sizeof(json_path), "%s/%s/profile.json", ROOT_DIR, timestamp_str);
+    int path_length = snprintf(json_path, sizeof(json_path), "%s/%s/profile.json",
+                               ROOT_DIR, timestamp_str);
 #endif
-    
-    FILE* f = fopen(json_path, "w");
-    if (f) {
-        fprintf(f, "{\n");
-        fprintf(f, "  \"name\": \"Davis Schneider %s\",\n", timestamp_str);
-        fprintf(f, "  \"pronouns\": \"the/goat\",\n");
-        fprintf(f, "  \"instagram\": \"@testuser\",\n");
-        fprintf(f, "  \"discord\": \"test#1234\",\n");
-        fprintf(f, "  \"linkedin\": \"linkedin.com/in/test\",\n");
-        fprintf(f, "  \"twitter\": \"the fuckin goat\",\n");
-        fprintf(f, "  \"photo\": \"photo.bmp\",\n");
-        fprintf(f, "  \"signature\": \"signature.bmp\"\n");
-        fprintf(f, "}\n");
-        fclose(f);
-    }
+    Scanner scanner = {.top_vram = top_vram, .bottom_vram = bottom_vram};
+    int result = 1;
+    bool a_released = false;
+    u8 *grayscale = malloc(FRAME_PIXELS);
+    bool usable = grayscale && path_length >= 0 && (size_t)path_length < sizeof(json_path);
 
-    // 2. Render Top Screen (Placeholder)
-    u16* off_top = (u16*)malloc(256 * 192 * 2);
-    for (int i = 0; i < 256 * 192; i++) off_top[i] = GB_BG_COLOR | BIT(15);
-    
-    print_string_embedded("NETWORK SETUP", 76, 40, off_top);
-    print_string_embedded("THE NETWORK WILL BE", 48, 80, off_top);
-    print_string_embedded("CONNECTED IN THE FUTURE", 40, 96, off_top);
-    
-    dmaCopy(off_top, top_vram, 256 * 192 * 2);
-    free(off_top);
+    dmaFillHalfWords(GB_BG_COLOR | BIT(15), top_vram, FRAME_PIXELS * sizeof(u16));
+    if (usable)
+        start_camera(&scanner);
+    else
+        scanner_status(&scanner, "SCANNER UNAVAILABLE. B TO CANCEL");
 
-    // 3. Render Bottom Screen ("PRESS A TO PROCEED")
-    u16* off_bot = (u16*)malloc(256 * 192 * 2);
-    for (int i = 0; i < 256 * 192; i++) off_bot[i] = GB_BG_COLOR | BIT(15);
-
-    print_string_embedded("PRESS A TO PROCEED", 52, 90, off_bot);
-
-    dmaCopy(off_bot, bottom_vram, 256 * 192 * 2);
-    free(off_bot);
-
-    // 4. Wait for user to press A to return to the home screen
-    while (1) {
+    while (!scanner.cancelled) {
         swiWaitForVBlank();
         scanKeys();
-        if (keysDown() & KEY_A) {
-
-            // gavin make sure the progression doesn't actually work and then return 0 to go to next screen ONLY IF THEY SCAN QR - so remove this
-            return 0;
+        int held = keysHeld();
+        if (held & KEY_B) {
+            scanner.cancelled = true;
+            break;
         }
-
-        if (keysDown() & KEY_B) {
-            return 1;
-        }
-
-        if (keysDown() & KEY_SELECT) {
-
-            // dummy code to skip network
-
-            FILE* f = fopen(json_path, "w");
-            if (f) {
-                fprintf(f, "{\n");
-                fprintf(f, "  \"name\": \"Who Knows %s\",\n", timestamp_str);
-                fprintf(f, "  \"pronouns\": \"?\",\n");
-                fprintf(f, "  \"instagram\": \"@testuser\",\n");
-                fprintf(f, "  \"discord\": \"test\",\n");
-                fprintf(f, "  \"linkedin\": \"test\",\n");
-                fprintf(f, "  \"twitter\": \"the goat\",\n");
-                fprintf(f, "  \"photo\": \"photo.bmp\",\n");
-                fprintf(f, "  \"signature\": \"signature.bmp\"\n");
-                fprintf(f, "}\n");
-                fclose(f);
+        if (!(held & KEY_A))
+            a_released = true;
+        if (usable && a_released && (keysDown() & KEY_A)) {
+            a_released = false;
+            if (scanner.camera_ready || start_camera(&scanner)) {
+                scanner.capture_requested = true;
+                scanner_status(&scanner, "CAPTURING FRAME...");
             }
-
-            return 0;
         }
+        update_preview(&scanner);
+        if (!scanner.frame_ready)
+            continue;
 
-
+        // This is the reference scanner's RGB555 -> 8-bit luminance conversion.
+        // No camera transfer can write top_vram until conversion is complete.
+        for (int i = 0; i < FRAME_PIXELS; i++) {
+            u16 pixel = top_vram[i];
+            u8 r = ((pixel >> 0) & 0x1F) << 3;
+            u8 g = ((pixel >> 5) & 0x1F) << 3;
+            u8 b = ((pixel >> 10) & 0x1F) << 3;
+            grayscale[i] = (r * 77 + g * 150 + b * 29) >> 8;
+        }
+        scanner.frame_ready = false;
+        update_preview(&scanner);
+        if (send_frame(&scanner, grayscale, json_path)) {
+            result = 0;
+            break;
+        }
+        // A held during the request cannot queue an automatic retry.
+        a_released = false;
     }
+
+    stop_camera(&scanner);
+    if (Wifi_CheckInit())
+        Wifi_DisconnectAP();
+    free(grayscale);
+    return result;
 }
