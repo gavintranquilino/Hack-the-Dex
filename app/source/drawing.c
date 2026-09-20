@@ -158,10 +158,11 @@ static bool save_bmp(const char *path, u16* canvas) {
 }
 
 static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_active) {
-    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
-    print_text("MAKE YOUR MARK", 12, 10, screen, RGB15(4, 5, 8), 2);
+    dmaFillHalfWords(RGB15(31, 31, 31) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
+    print_text("MAKE YOUR MARK", 12, 10, screen, RGB15(21, 5, 7), 2);
     print_string_embedded("01 SCAN > 02 PHOTO > 03 DRAW", 12, 32, screen);
-    draw_rounded_box(screen, 8, 47, 240, 81, 9, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 47, 240, 81, 9, RGB15(31, 31, 31), RGB15(4, 5, 8));
     print_string_embedded("INK", 18, 58, screen);
     print_string_embedded(eraser_active ? "ERASER ON" : color_names[color_idx], 54, 58, screen);
     for (int i = 0; i < NUM_COLORS; i++) {
@@ -174,16 +175,16 @@ static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_act
     print_string_embedded("X ERASER", 174, 114, screen);
     print_string_embedded("LEFT/RIGHT INK   UP/DOWN SIZE", 12, 139, screen);
     draw_rounded_box(screen, 8, 156, 150, 25, 7, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 153, 150, 25, 7, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 153, 150, 25, 7, RGB15(23, 29, 23), RGB15(4, 5, 8));
     print_string_embedded("A SAVE DRAWING", 41, 162, screen);
-    draw_rounded_box(screen, 166, 153, 82, 25, 7, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 166, 153, 82, 25, 7, RGB15(31, 21, 21), RGB15(4, 5, 8));
     print_string_embedded("B CLEAR", 186, 162, screen);
     print_string_embedded("DRAW INSIDE THE FRAME BELOW", 47, 183, screen);
 }
 
 static void clear_drawing(u16* canvas, u16* screen) {
     clear_canvas(canvas);
-    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+    dmaFillHalfWords(RGB15(28, 14, 15) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
     draw_rounded_box(screen, 4, 4, 248, 184, 8, WHITE, RGB15(4, 5, 8));
 }
 
@@ -247,7 +248,7 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
                 free(canvas);
                 return 1;
             }
-            draw_rounded_box(top_vram, 8, 153, 240, 25, 7, RGB15(31, 31, 30), RGB15(23, 4, 6));
+            draw_rounded_box(top_vram, 8, 153, 240, 25, 7, RGB15(31, 31, 31), RGB15(23, 4, 6));
             print_text("SAVE FAILED. A TO RETRY", 26, 162, top_vram, RGB15(23, 4, 6), 1);
         }
 
