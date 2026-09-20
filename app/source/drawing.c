@@ -22,9 +22,12 @@ static const u16 brush_colors[] = {
     RGB15(31, 16, 0) | BIT(15),  // Orange
     RGB15(31, 31, 0) | BIT(15)   // Yellow
 };
+
+static const u16 ERASER = RGB15(31, 31, 31) | BIT(15);   // White
 static const char* color_names[] = {
     "RED", "GREEN", "BLUE", "BLACK", "PURPLE", "ORANGE", "YELLOW"
 };
+static const char* eraser[] = {"OFF", "ON"};
 #define NUM_COLORS 7
 
 static const int brush_sizes[] = { 1, 2, 3 }; // Small (1x), Medium (2x), Large (3x)
@@ -132,7 +135,7 @@ static bool save_bmp(const char *path, u16* canvas) {
     return true;
 }
 
-static void draw_top_ui(u16* top_vram, int color_idx, int size_idx) {
+static void draw_top_ui(u16* top_vram, int color_idx, int size_idx, int eraser_active) {
     for (int i = 0; i < CANVAS_WIDTH * CANVAS_HEIGHT; i++) {
         top_vram[i] = GB_BG_COLOR | BIT(15);
     }
@@ -153,6 +156,10 @@ static void draw_top_ui(u16* top_vram, int color_idx, int size_idx) {
     snprintf(color_buf, sizeof(color_buf), "LEFT/RIGHT = CHANGE COLOR (%s)", color_names[color_idx]);
     print_string_embedded(color_buf, 12, 130, top_vram);
 
+    char eraser_buf[64];
+    snprintf(eraser_buf, sizeof(eraser_buf), "X = TOGGLE ERASER (%s)", eraser[eraser_active]);
+    print_string_embedded(eraser_buf, 12, 150, top_vram);
+
     const char* dex_msg = "HACK THE DEX";
     int dex_x = 256 - (strlen(dex_msg) * 6) - 3; 
     int dex_y = 192 - 8 - 3;              
@@ -162,9 +169,10 @@ static void draw_top_ui(u16* top_vram, int color_idx, int size_idx) {
 int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_path) {
     int color_idx = 3; // Default Black
     int size_idx = 1;  // Default Medium (2x)
+    int eraser_active = 0;
     
     clear_canvas(bottom_vram);
-    draw_top_ui(top_vram, color_idx, size_idx);
+    draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
 
     while (1) {
         swiWaitForVBlank();
@@ -177,24 +185,33 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
             clear_canvas(bottom_vram);
         }
 
+        if (keys_down & KEY_X) {
+            eraser_active != eraser_active;
+            draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+        }
+
         if (keys_down & KEY_RIGHT) {
-            color_idx = (color_idx + 1) % NUM_COLORS;
-            draw_top_ui(top_vram, color_idx, size_idx);
+            if (eraser_active == 0) {
+                color_idx = (color_idx + 1) % NUM_COLORS;
+                draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            }
         }
 
         if (keys_down & KEY_LEFT) {
-            color_idx = (color_idx - 1 + NUM_COLORS) % NUM_COLORS;
-            draw_top_ui(top_vram, color_idx, size_idx);
+            if (eraser_active == 0) {
+                color_idx = (color_idx - 1 + NUM_COLORS) % NUM_COLORS;
+                draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
+            }
         }
 
         if (keys_down & KEY_UP) {
             size_idx = (size_idx + 1) % NUM_SIZES;
-            draw_top_ui(top_vram, color_idx, size_idx);
+            draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
         }
 
         if (keys_down & KEY_DOWN) {
             size_idx = (size_idx - 1 + NUM_SIZES) % NUM_SIZES;
-            draw_top_ui(top_vram, color_idx, size_idx);
+            draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
         }
 
         if (keys_down & KEY_A) {
@@ -208,7 +225,14 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
             touchRead(&touch);
 
             if (touch.px > 0 && touch.py > 0 && touch.px < CANVAS_WIDTH && touch.py < CANVAS_HEIGHT) {
-                u16 current_color = brush_colors[color_idx];
+
+                u16 current_color;
+
+                if (eraser_active == 0) {
+                    current_color = brush_colors[color_idx];
+                } else {
+                    current_color = ERASER;
+                }
                 int current_size = brush_sizes[size_idx];
 
                 if (last_x >= 0 && last_y >= 0) {
