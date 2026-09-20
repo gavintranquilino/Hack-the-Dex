@@ -16,14 +16,14 @@ static const char* field_names[FIELD_COUNT] = {
 static const char* keyboard_lower[KEYBOARD_ROWS] = {
     "qwertyuiop",
     "asdfghjkl",
-    "zxcvbnm.-",
+    "zxcvbnm.-/",
     "0123456789"
 };
 
 static const char* keyboard_upper[KEYBOARD_ROWS] = {
     "QWERTYUIOP",
     "ASDFGHJKL",
-    "ZXCVBNM.-",
+    "ZXCVBNM.-/",
     "0123456789"
 };
 
