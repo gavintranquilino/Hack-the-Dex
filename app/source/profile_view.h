@@ -3,10 +3,6 @@
 
 #include <nds.h>
 
-// Shared GameBoy Theme Colors
-#define GB_BG_COLOR   RGB15(17, 21, 1)
-#define GB_TEXT_COLOR RGB15(1, 7, 1)
-
 typedef struct {
     char name[64];
     char pronouns[32];

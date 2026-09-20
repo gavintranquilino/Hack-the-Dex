@@ -8,10 +8,32 @@
 #define CANVAS_WIDTH 256
 #define CANVAS_HEIGHT 192
 #define WHITE (RGB15(31, 31, 31) | BIT(15))
-#define GB_BG_COLOR RGB15(17, 21, 1)
-#define GB_TEXT_COLOR RGB15(1, 7, 1)
+// Clip every primitive to the physical DSi bitmap, including rounded corners.
+static void rounded_fill(u16* screen, int x, int y, int w, int h, int r, u16 color) {
+    if (w <= 0 || h <= 0) return;
+    if (r > w / 2) r = w / 2;
+    if (r > h / 2) r = h / 2;
+    if (r < 0) r = 0;
+    for (int dy = 0; dy < h; dy++) {
+        int py = y + dy;
+        if (py < 0 || py >= 192) continue;
+        for (int dx = 0; dx < w; dx++) {
+            int px = x + dx;
+            if (px < 0 || px >= 256) continue;
+            int cx = dx < r ? r - 1 - dx : (dx >= w - r ? dx - (w - r) : 0);
+            int cy = dy < r ? r - 1 - dy : (dy >= h - r ? dy - (h - r) : 0);
+            if (cx * cx + cy * cy <= r * r)
+                screen[py * 256 + px] = color | BIT(15);
+        }
+    }
+}
 
-extern void print_string_embedded(const char* str, int x, int y, u16* offscreen);
+void draw_rounded_box(u16* screen, int x, int y, int width, int height,
+                      int radius, u16 fill, u16 border) {
+    rounded_fill(screen, x, y, width, height, radius, border);
+    rounded_fill(screen, x + 2, y + 2, width - 4, height - 4,
+                 radius - 2, fill);
+}
 
 static const u16 brush_colors[] = {
     RGB15(31, 0, 0) | BIT(15),   // Red
@@ -27,7 +49,6 @@ static const u16 ERASER = RGB15(31, 31, 31) | BIT(15);   // White
 static const char* color_names[] = {
     "RED", "GREEN", "BLUE", "BLACK", "PURPLE", "ORANGE", "YELLOW"
 };
-static const char* eraser[] = {"OFF", "ON"};
 #define NUM_COLORS 7
 
 static const int brush_sizes[] = { 1, 2, 3 }; // Small (1x), Medium (2x), Large (3x)
@@ -43,7 +64,7 @@ static void draw_pixel(int x, int y, u16 color, int size, u16* canvas) {
         for (int dx = -offset; dx < size - offset; dx++) {
             int px = x + dx;
             int py = y + dy;
-            if (px >= 0 && px < CANVAS_WIDTH && py >= 0 && py < CANVAS_HEIGHT) {
+            if (px >= 8 && px < CANVAS_WIDTH - 8 && py >= 8 && py < CANVAS_HEIGHT - 8) {
                 canvas[py * CANVAS_WIDTH + px] = color;
             }
         }
@@ -131,39 +152,39 @@ static bool save_bmp(const char *path, u16* canvas) {
         }
     }
 
-    fclose(file);
-    return true;
+    bool ok = !ferror(file);
+    if (fclose(file) != 0) ok = false;
+    return ok;
 }
 
-static void draw_top_ui(u16* top_vram, int color_idx, int size_idx, int eraser_active) {
-    for (int i = 0; i < CANVAS_WIDTH * CANVAS_HEIGHT; i++) {
-        top_vram[i] = GB_BG_COLOR | BIT(15);
+static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_active) {
+    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+    print_text("MAKE YOUR MARK", 12, 10, screen, RGB15(4, 5, 8), 2);
+    print_string_embedded("01 SCAN > 02 PHOTO > 03 DRAW", 12, 32, screen);
+    draw_rounded_box(screen, 8, 47, 240, 81, 9, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    print_string_embedded("INK", 18, 58, screen);
+    print_string_embedded(eraser_active ? "ERASER ON" : color_names[color_idx], 54, 58, screen);
+    for (int i = 0; i < NUM_COLORS; i++) {
+        int x = 18 + i * 32;
+        draw_rounded_box(screen, x, 72, 26, 23, 6, brush_colors[i], RGB15(4, 5, 8));
+        if (i == color_idx && !eraser_active) print_string_embedded("^", x + 10, 97, screen);
     }
+    print_string_embedded("SIZE", 18, 114, screen);
+    print_string_embedded(size_names[size_idx], 54, 114, screen);
+    print_string_embedded("X ERASER", 174, 114, screen);
+    print_string_embedded("LEFT/RIGHT INK   UP/DOWN SIZE", 12, 139, screen);
+    draw_rounded_box(screen, 8, 156, 150, 25, 7, RGB15(4, 5, 8), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 153, 150, 25, 7, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_string_embedded("A SAVE DRAWING", 41, 162, screen);
+    draw_rounded_box(screen, 166, 153, 82, 25, 7, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    print_string_embedded("B CLEAR", 186, 162, screen);
+    print_string_embedded("DRAW INSIDE THE FRAME BELOW", 47, 183, screen);
+}
 
-    const char* title_msg = "ADD YOUR DRAWING";
-    int title_x = (256 - (strlen(title_msg) * 6)) / 2;
-    print_string_embedded(title_msg, title_x, 12, top_vram);
-
-    print_string_embedded("USE STYLUS TO DRAW", 12, 45, top_vram);
-    print_string_embedded("A = CONFIRM", 12, 70, top_vram);
-    print_string_embedded("B = CLEAR", 12, 90, top_vram);
-
-    char size_buf[64];
-    snprintf(size_buf, sizeof(size_buf), "UP/DOWN = BRUSH SIZE (%s)", size_names[size_idx]);
-    print_string_embedded(size_buf, 12, 110, top_vram);
-    
-    char color_buf[64];
-    snprintf(color_buf, sizeof(color_buf), "LEFT/RIGHT = CHANGE COLOR (%s)", color_names[color_idx]);
-    print_string_embedded(color_buf, 12, 130, top_vram);
-
-    char eraser_buf[64];
-    snprintf(eraser_buf, sizeof(eraser_buf), "X = TOGGLE ERASER (%s)", eraser[eraser_active]);
-    print_string_embedded(eraser_buf, 12, 150, top_vram);
-
-    const char* dex_msg = "HACK THE DEX";
-    int dex_x = 256 - (strlen(dex_msg) * 6) - 3; 
-    int dex_y = 192 - 8 - 3;              
-    print_string_embedded(dex_msg, dex_x, dex_y, top_vram);
+static void clear_drawing(u16* canvas, u16* screen) {
+    clear_canvas(canvas);
+    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+    draw_rounded_box(screen, 4, 4, 248, 184, 8, WHITE, RGB15(4, 5, 8));
 }
 
 int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_path) {
@@ -171,7 +192,10 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
     int size_idx = 1;  // Default Medium (2x)
     int eraser_active = 0;
     
-    clear_canvas(bottom_vram);
+    // Artwork has its own buffer so the decorative frame never enters the BMP.
+    u16* canvas = malloc(CANVAS_WIDTH * CANVAS_HEIGHT * sizeof(u16));
+    if (!canvas) return 0;
+    clear_drawing(canvas, bottom_vram);
     draw_top_ui(top_vram, color_idx, size_idx, eraser_active);
 
     while (1) {
@@ -182,7 +206,7 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
         int keys_held = keysHeld();
 
         if (keys_down & KEY_B) {
-            clear_canvas(bottom_vram);
+            clear_drawing(canvas, bottom_vram);
         }
 
         if (keys_down & KEY_X) {
@@ -219,16 +243,19 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
         }
 
         if (keys_down & KEY_A) {
-            if (save_bmp(signature_path, bottom_vram)) {
+            if (save_bmp(signature_path, canvas)) {
+                free(canvas);
                 return 1;
             }
+            draw_rounded_box(top_vram, 8, 153, 240, 25, 7, RGB15(31, 31, 30), RGB15(23, 4, 6));
+            print_text("SAVE FAILED. A TO RETRY", 26, 162, top_vram, RGB15(23, 4, 6), 1);
         }
 
         if (keys_held & KEY_TOUCH) {
             touchPosition touch;
             touchRead(&touch);
 
-            if (touch.px > 0 && touch.py > 0 && touch.px < CANVAS_WIDTH && touch.py < CANVAS_HEIGHT) {
+            if (touch.px >= 8 && touch.py >= 8 && touch.px < CANVAS_WIDTH - 8 && touch.py < CANVAS_HEIGHT - 8) {
 
                 u16 current_color;
 
@@ -240,13 +267,17 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
                 int current_size = brush_sizes[size_idx];
 
                 if (last_x >= 0 && last_y >= 0) {
+                    draw_line(last_x, last_y, touch.px, touch.py, current_color, current_size, canvas);
                     draw_line(last_x, last_y, touch.px, touch.py, current_color, current_size, bottom_vram);
                 } else {
+                    draw_pixel(touch.px, touch.py, current_color, current_size, canvas);
                     draw_pixel(touch.px, touch.py, current_color, current_size, bottom_vram);
                 }
 
                 last_x = touch.px;
                 last_y = touch.py;
+            } else {
+                last_x = last_y = -1;
             }
         } else {
             last_x = -1;

@@ -1,5 +1,6 @@
 #include "network_connection.h"
 #include "cJSON.h"
+#include "drawing.h"
 #include <dswifi9.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -12,8 +13,6 @@
 #include <ctype.h>
 #include <stdarg.h>
 
-#define GB_BG_COLOR   RGB15(17, 21, 1)
-#define GB_TEXT_COLOR RGB15(1, 7, 1)
 #define ROOT_DIR "sd:/hackthedex"
 
 // Keep the endpoint and wire format in sync with qr_code_parse.
@@ -37,105 +36,10 @@ extern int global_port_number;
 #define PROFILE_DIR ROOT_DIR "/emulator"
 #endif
 
-// Crisp 5x7 Embedded Font
-static const u8 font5x7[64][8] = {
-  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 32  
-  {0x20,0x20,0x20,0x20,0x20,0x00,0x20,0x00}, // 33 !
-  {0x50,0x50,0x50,0x00,0x00,0x00,0x00,0x00}, // 34 "
-  {0x50,0xF8,0x50,0xF8,0x50,0x00,0x00,0x00}, // 35 #
-  {0x20,0x78,0xA0,0x70,0x28,0xF0,0x20,0x00}, // 36 $
-  {0xC0,0xC8,0x10,0x20,0x40,0x98,0x18,0x00}, // 37 %
-  {0x40,0xA0,0x40,0xA8,0x90,0x68,0x00,0x00}, // 38 &
-  {0x60,0x20,0x40,0x00,0x00,0x00,0x00,0x00}, // 39 '
-  {0x10,0x20,0x40,0x40,0x40,0x20,0x10,0x00}, // 40 (
-  {0x40,0x20,0x10,0x10,0x10,0x20,0x40,0x00}, // 41 )
-  {0x00,0x20,0x70,0xF8,0x70,0x20,0x00,0x00}, // 42 *
-  {0x00,0x20,0x20,0xF8,0x20,0x20,0x00,0x00}, // 43 +
-  {0x00,0x00,0x00,0x00,0x00,0x60,0x20,0x40}, // 44 ,
-  {0x00,0x00,0x00,0xF8,0x00,0x00,0x00,0x00}, // 45 -
-  {0x00,0x00,0x00,0x00,0x00,0x60,0x60,0x00}, // 46 .
-  {0x00,0x08,0x10,0x20,0x40,0x80,0x00,0x00}, // 47 /
-  {0x70,0x88,0x98,0xA8,0xC8,0x88,0x70,0x00}, // 48 0
-  {0x20,0x60,0x20,0x20,0x20,0x20,0x70,0x00}, // 49 1
-  {0x70,0x88,0x08,0x10,0x20,0x40,0xF8,0x00}, // 50 2
-  {0x70,0x88,0x08,0x30,0x08,0x88,0x70,0x00}, // 51 3
-  {0x10,0x30,0x50,0x90,0xF8,0x10,0x10,0x00}, // 52 4
-  {0xF8,0x80,0xF0,0x08,0x08,0x88,0x70,0x00}, // 53 5
-  {0x30,0x40,0x80,0xF0,0x88,0x88,0x70,0x00}, // 54 6
-  {0xF8,0x08,0x10,0x20,0x40,0x40,0x40,0x00}, // 55 7
-  {0x70,0x88,0x88,0x70,0x88,0x88,0x70,0x00}, // 56 8
-  {0x70,0x88,0x88,0x78,0x08,0x10,0x60,0x00}, // 57 9
-  {0x00,0x60,0x60,0x00,0x60,0x60,0x00,0x00}, // 58 :
-  {0x00,0x60,0x60,0x00,0x60,0x20,0x40,0x00}, // 59 ;
-  {0x10,0x20,0x40,0x80,0x40,0x20,0x10,0x00}, // 60 <
-  {0x00,0x00,0xF8,0x00,0xF8,0x00,0x00,0x00}, // 61 =
-  {0x40,0x20,0x10,0x08,0x10,0x20,0x40,0x00}, // 62 >
-  {0x70,0x88,0x08,0x10,0x20,0x00,0x20,0x00}, // 63 ?
-  {0x70,0x88,0x88,0xA8,0xB8,0x80,0x70,0x00}, // 64 @
-  {0x70,0x88,0x88,0xF8,0x88,0x88,0x88,0x00}, // 65 A
-  {0xF0,0x88,0x88,0xF0,0x88,0x88,0xF0,0x00}, // 66 B
-  {0x70,0x88,0x80,0x80,0x80,0x88,0x70,0x00}, // 67 C
-  {0xF0,0x88,0x88,0x88,0x88,0x88,0xF0,0x00}, // 68 D
-  {0xF8,0x80,0x80,0xF0,0x80,0x80,0xF8,0x00}, // 69 E
-  {0xF8,0x80,0x80,0xF0,0x80,0x80,0x80,0x00}, // 70 F
-  {0x70,0x88,0x80,0xB8,0x88,0x88,0x70,0x00}, // 71 G
-  {0x88,0x88,0x88,0xF8,0x88,0x88,0x88,0x00}, // 72 H
-  {0x70,0x20,0x20,0x20,0x20,0x20,0x70,0x00}, // 73 I
-  {0x08,0x08,0x08,0x08,0x88,0x88,0x70,0x00}, // 74 J
-  {0x88,0x90,0xA0,0xC0,0xA0,0x90,0x88,0x00}, // 75 K
-  {0x80,0x80,0x80,0x80,0x80,0x80,0xF8,0x00}, // 76 L
-  {0x88,0xD8,0xA8,0x88,0x88,0x88,0x88,0x00}, // 77 M
-  {0x88,0x88,0xC8,0xA8,0x98,0x88,0x88,0x00}, // 78 N
-  {0x70,0x88,0x88,0x88,0x88,0x88,0x70,0x00}, // 79 O
-  {0xF0,0x88,0x88,0xF0,0x80,0x80,0x80,0x00}, // 80 P
-  {0x70,0x88,0x88,0x88,0xA8,0x90,0x68,0x00}, // 81 Q
-  {0xF0,0x88,0x88,0xF0,0xA0,0x90,0x88,0x00}, // 82 R
-  {0x70,0x88,0x80,0x70,0x08,0x88,0x70,0x00}, // 83 S
-  {0xF8,0x20,0x20,0x20,0x20,0x20,0x20,0x00}, // 84 T
-  {0x88,0x88,0x88,0x88,0x88,0x88,0x70,0x00}, // 85 U
-  {0x88,0x88,0x88,0x88,0x88,0x50,0x20,0x00}, // 86 V
-  {0x88,0x88,0x88,0xA8,0xA8,0xD8,0x88,0x00}, // 87 W
-  {0x88,0x88,0x50,0x20,0x50,0x88,0x88,0x00}, // 88 X
-  {0x88,0x88,0x50,0x20,0x20,0x20,0x20,0x00}, // 89 Y
-  {0xF8,0x08,0x10,0x20,0x40,0x80,0xF8,0x00}, // 90 Z
-  {0x60,0x40,0x40,0x40,0x40,0x40,0x60,0x00}, // 91 [
-  {0x00,0x80,0x40,0x20,0x10,0x08,0x00,0x00}, // 92 
-  {0x30,0x10,0x10,0x10,0x10,0x10,0x30,0x00}, // 93 ]
-  {0x20,0x50,0x88,0x00,0x00,0x00,0x00,0x00}, // 94 ^
-  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF8}  // 95 _
-};
-
-static void draw_char_embedded(char c, int x, int y, u16* offscreen) {
-    if (c < 32 || c > 95) c = 32; 
-    int char_index = c - 32;
-
-    for (int ty = 0; ty < 8; ty++) {
-        u8 row = font5x7[char_index][ty];
-        for (int tx = 0; tx < 5; tx++) { 
-            if (row & (1 << (7 - tx))) {
-                int px = x + tx;
-                int py = y + ty;
-                if (px >= 0 && px < 256 && py >= 0 && py < 192) {
-                    offscreen[py * 256 + px] = GB_TEXT_COLOR | BIT(15);
-                }
-            }
-        }
-    }
-}
-
-static void print_string_embedded(const char* str, int x, int y, u16* offscreen) {
-    if (!str) return;
-    int curr_x = x;
-    for (int i = 0; str[i] != '\0'; i++) {
-        char c = toupper((unsigned char)str[i]);
-        draw_char_embedded(c, curr_x, y, offscreen);
-        curr_x += 6;
-    }
-}
-
 typedef struct {
     u16 *top_vram;
     u16 *bottom_vram;
+    bool busy;
     bool camera_initialized;
     bool camera_ready;
     bool transfer_pending;
@@ -148,9 +52,48 @@ typedef struct {
     int log_count;
 } Scanner;
 
+static void draw_scanner_ui(Scanner* scanner, const char* message) {
+    u16* screen = scanner->bottom_vram;
+    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), screen, FRAME_PIXELS * sizeof(u16));
+    print_text("FIND A FRIEND", 12, 10, screen, RGB15(4, 5, 8), 2);
+    print_string_embedded("01 SCAN > 02 PHOTO > 03 DRAW", 12, 32, screen);
+    draw_rounded_box(screen, 8, 48, 240, 99, 9, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    bool error = strstr(message, "FAILED") || strstr(message, "TIMEOUT") ||
+                 strstr(message, "UNAVAILABLE") || strstr(message, "REQUIRED");
+    u16 accent = error ? RGB15(23, 4, 6) : RGB15(3, 13, 10);
+    print_text(error ? "! CHECK CONNECTION" : (scanner->busy ? "... LINKING" : "LINK STATUS"),
+               18, 57, screen, accent, 1);
+    char line[37];
+    snprintf(line, sizeof(line), "%.36s", message);
+    print_string_embedded(line, 18, 73, screen);
+    if (strlen(message) > 36) print_string_embedded(message + 36, 18, 84, screen);
+    int first = scanner->log_count > 4 ? scanner->log_count - 4 : 0;
+    for (int i = first; i < scanner->log_count - 1; i++)
+        print_text_fit(scanner->log_lines[i], 18, 104 + (i - first) * 12, 36,
+                       screen, RGB15(12, 13, 14), 1);
+    draw_rounded_box(screen, 8, 155, 150, 24, 7, RGB15(4, 5, 8), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 152, 150, 24, 7,
+                     scanner->busy ? RGB15(26, 26, 24) : RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_string_embedded(scanner->busy ? "PLEASE WAIT..." : "A SCAN / RETRY", 44, 161, screen);
+    draw_rounded_box(screen, 166, 152, 82, 24, 7, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    print_string_embedded("B BACK", 189, 161, screen);
+    print_string_embedded("ALIGN QR CODE ON THE TOP SCREEN", 38, 183, screen);
+}
+
+static int scanner_keys(void) {
+    int keys = keysDown();
+    if (keys & KEY_TOUCH) {
+        touchPosition touch;
+        touchRead(&touch);
+        if (touch.py >= 152 && touch.py < 176) {
+            if (touch.px >= 8 && touch.px < 158) keys |= KEY_A;
+            if (touch.px >= 166 && touch.px < 248) keys |= KEY_B;
+        }
+    }
+    return keys;
+}
+
 static void scanner_status(Scanner *scanner, const char *message) {
-    u16 *screen = scanner->bottom_vram;
-    dmaFillHalfWords(GB_BG_COLOR | BIT(15), screen, FRAME_PIXELS * sizeof(u16));
     if (scanner->log_count < 6) {
         snprintf(scanner->log_lines[scanner->log_count],
                  sizeof(scanner->log_lines[scanner->log_count]), "%s", message);
@@ -161,12 +104,7 @@ static void scanner_status(Scanner *scanner, const char *message) {
                      "%s", scanner->log_lines[i]);
         snprintf(scanner->log_lines[5], sizeof(scanner->log_lines[5]), "%s", message);
     }
-    print_string_embedded("NETWORK SETUP", 88, 8, screen);
-    print_string_embedded("ALIGN QR CODE ON TOP SCREEN", 50, 20, screen);
-    for (int i = 0; i < scanner->log_count; i++)
-        print_string_embedded(scanner->log_lines[i], 4, 40 + i * 16, screen);
-    print_string_embedded("A: CAPTURE / RETRY", 76, 152, screen);
-    print_string_embedded("B: CANCEL", 100, 168, screen);
+    draw_scanner_ui(scanner, message);
 }
 
 static void scanner_statusf(Scanner *scanner, const char *format, ...) {
@@ -262,7 +200,7 @@ static bool scanner_wait(Scanner *scanner) {
     scanKeys();
     if (keysDown() & KEY_SELECT)
         scanner->select_requested = true;
-    if (keysHeld() & KEY_B)
+    if ((keysHeld() | scanner_keys()) & KEY_B)
         scanner->cancelled = true;
     update_preview(scanner);
     return !scanner->cancelled && !scanner->select_requested;
@@ -526,9 +464,10 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
     int result = 1;
     bool a_released = false;
     u8 *grayscale = malloc(FRAME_PIXELS);
+    scanner.busy = true;
     bool usable = grayscale && path_length >= 0 && (size_t)path_length < sizeof(json_path);
 
-    dmaFillHalfWords(GB_BG_COLOR | BIT(15), top_vram, FRAME_PIXELS * sizeof(u16));
+    dmaFillHalfWords(RGB15(31, 30, 25) | BIT(15), top_vram, FRAME_PIXELS * sizeof(u16));
     if (usable) {
         bool wifi_initialized = Wifi_CheckInit();
         if (wifi_initialized) {
@@ -553,23 +492,26 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
     if (!usable)
         scanner_status(&scanner, "SCANNER UNAVAILABLE. B TO CANCEL");
 
+    scanner.busy = false;
+    draw_scanner_ui(&scanner, scanner.log_lines[scanner.log_count - 1]);
     while (!scanner.cancelled) {
         swiWaitForVBlank();
         scanKeys();
         int held = keysHeld();
+        int pressed = scanner_keys();
         if (keysDown() & KEY_SELECT) {
             scanner.select_requested = true;
             if (save_dummy_profile(json_path, timestamp_str))
                 result = 0;
             break;
         }
-        if (held & KEY_B) {
+        if ((held | pressed) & KEY_B) {
             scanner.cancelled = true;
             break;
         }
         if (!(held & KEY_A))
             a_released = true;
-        if (usable && a_released && (keysDown() & KEY_A)) {
+        if (usable && a_released && (pressed & KEY_A)) {
             a_released = false;
             if (scanner.camera_ready || start_camera(&scanner)) {
                 scanner.capture_requested = true;
@@ -591,7 +533,10 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
         }
         scanner.frame_ready = false;
         update_preview(&scanner);
-        if (send_frame(&scanner, grayscale, json_path)) {
+        scanner.busy = true;
+        bool sent = send_frame(&scanner, grayscale, json_path);
+        scanner.busy = false;
+        if (sent) {
             result = 0;
             break;
         }
@@ -604,6 +549,7 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
             start_camera(&scanner);
         // A held during the request cannot queue an automatic retry.
         a_released = false;
+        if (!scanner.cancelled) draw_scanner_ui(&scanner, scanner.log_lines[scanner.log_count - 1]);
     }
 
     stop_camera(&scanner);

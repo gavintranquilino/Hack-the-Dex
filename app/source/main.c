@@ -13,12 +13,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "drawing.h"
-#include "setup_screen.h" // ADD THIS
+#include "setup_screen.h"
 
 
-// GameBoy Theme Colors
-#define GB_BG_COLOR   RGB15(17, 21, 1)
-#define GB_TEXT_COLOR RGB15(1, 7, 1)
+#define MENU_VISIBLE_ROWS 5
 
 #define ROOT_DIR "sd:/hackthedex"
 
@@ -256,149 +254,139 @@ void load_users() {
 // ---------------------------------------------------------
 // Standalone 5x7 Pixel-Perfect Text Renderer
 // ---------------------------------------------------------
-void draw_char_embedded(char c, int x, int y, u16* offscreen) {
-    if (c < 32 || c > 95) c = 32; 
-    int char_index = c - 32;
+// Lowercase keeps names and social handles readable without changing their case.
+static const u8 lowercase5x7[26][7] = {
+    {0,0,0x70,0x08,0x78,0x88,0x78}, {0x80,0x80,0xB0,0xC8,0x88,0x88,0xF0},
+    {0,0,0x70,0x88,0x80,0x88,0x70}, {0x08,0x08,0x68,0x98,0x88,0x88,0x78},
+    {0,0,0x70,0x88,0xF8,0x80,0x70}, {0x30,0x48,0x40,0xE0,0x40,0x40,0x40},
+    {0,0x78,0x88,0x88,0x78,0x08,0x70}, {0x80,0x80,0xB0,0xC8,0x88,0x88,0x88},
+    {0x20,0,0x60,0x20,0x20,0x20,0x70}, {0x10,0,0x30,0x10,0x10,0x90,0x60},
+    {0x80,0x80,0x90,0xA0,0xC0,0xA0,0x90}, {0x60,0x20,0x20,0x20,0x20,0x20,0x70},
+    {0,0,0xD0,0xA8,0xA8,0xA8,0xA8}, {0,0,0xB0,0xC8,0x88,0x88,0x88},
+    {0,0,0x70,0x88,0x88,0x88,0x70}, {0,0xF0,0x88,0x88,0xF0,0x80,0x80},
+    {0,0x78,0x88,0x88,0x78,0x08,0x08}, {0,0,0xB0,0xC8,0x80,0x80,0x80},
+    {0,0,0x78,0x80,0x70,0x08,0xF0}, {0x40,0x40,0xE0,0x40,0x40,0x48,0x30},
+    {0,0,0x88,0x88,0x88,0x98,0x68}, {0,0,0x88,0x88,0x88,0x50,0x20},
+    {0,0,0x88,0x88,0xA8,0xA8,0x50}, {0,0,0x88,0x50,0x20,0x50,0x88},
+    {0,0x88,0x88,0x88,0x78,0x08,0x70}, {0,0,0xF8,0x10,0x20,0x40,0xF8}
+};
 
-    for (int ty = 0; ty < 8; ty++) {
-        u8 row = font5x7[char_index][ty];
-        for (int tx = 0; tx < 5; tx++) { 
-            if (row & (1 << (7 - tx))) {
-                int px = x + tx;
-                int py = y + ty;
-                if (px >= 0 && px < 256 && py >= 0 && py < 192) {
-                    offscreen[py * 256 + px] = GB_TEXT_COLOR | BIT(15);
+void print_text(const char* text, int x, int y, u16* screen, u16 color, int scale) {
+    if (!text || scale < 1 || scale > 2) return;
+    for (int i = 0; text[i] && x < 256; i++, x += 6 * scale) {
+        unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 126) c = '?';
+        for (int ty = 0; ty < 8; ty++) {
+            u8 row = c >= 'a' && c <= 'z' ? (ty < 7 ? lowercase5x7[c - 'a'][ty] : 0) :
+                     font5x7[c <= 95 ? c - 32 : '?' - 32][ty];
+            for (int tx = 0; tx < 5; tx++) {
+                if (!(row & (1 << (7 - tx)))) continue;
+                for (int sy = 0; sy < scale; sy++) {
+                    for (int sx = 0; sx < scale; sx++) {
+                        int px = x + tx * scale + sx, py = y + ty * scale + sy;
+                        if (px >= 0 && px < 256 && py >= 0 && py < 192)
+                            screen[py * 256 + px] = color | BIT(15);
+                    }
                 }
             }
         }
     }
 }
 
-void print_string_embedded(const char* str, int x, int y, u16* offscreen) {
-    if (!str) return;
-    int curr_x = x;
-    for (int i = 0; str[i] != '\0'; i++) {
-        char c = toupper((unsigned char)str[i]);
-        draw_char_embedded(c, curr_x, y, offscreen);
-        curr_x += 6; // 5px width + 1px spacing
-    }
+void print_text_fit(const char* text, int x, int y, int max_chars,
+                    u16* screen, u16 color, int scale) {
+    if (!text || max_chars < 1) return;
+    char fitted[65];
+    if (max_chars > 64) max_chars = 64;
+    snprintf(fitted, sizeof(fitted), "%.*s", max_chars, text);
+    if ((int)strlen(text) > max_chars && max_chars >= 3)
+        memcpy(fitted + max_chars - 3, "...", 3);
+    print_text(fitted, x, y, screen, color, scale);
+}
+
+void print_string_embedded(const char* text, int x, int y, u16* screen) {
+    print_text(text, x, y, screen, RGB15(4, 5, 8), 1);
 }
 
 // ---------------------------------------------------------
 // Universal Frame & Hardware BMP Loader (Top Screen)
 // ---------------------------------------------------------
 void display_photo(const char* path, const char* name_str, u16* vram) {
-    u16* offscreen = (u16*)calloc(256 * 192, sizeof(u16));
-    if (!offscreen) return;
+    u16* screen = malloc(256 * 192 * sizeof(u16));
+    if (!screen) return;
+    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 30, 25) | BIT(15);
+    draw_rounded_box(screen, 8, 10, 240, 32, 9, RGB15(4, 5, 8), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 7, 240, 32, 9, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_text("HACK THE DEX", 24, 16, screen, RGB15(4, 5, 8), 2);
+    print_string_embedded("+", 226, 20, screen);
+    draw_rounded_box(screen, 8, 49, 240, 132, 10, RGB15(4, 5, 8), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 46, 240, 132, 10, RGB15(31, 31, 30), RGB15(4, 5, 8));
 
-    // Fill background
-    for(int i = 0; i < 256*192; i++) offscreen[i] = GB_BG_COLOR | BIT(15);
-
-    // 1. Draw Border
-    for (int y = 23; y <= 168; y++) {
-        for (int x = 15; x <= 240; x++) {
-            if (y == 23 || y == 168 || x == 15 || x == 240) {
-                offscreen[y * 256 + x] = GB_TEXT_COLOR | BIT(15); 
-            }
-        }
-    }
-
-    // 2. Load Photo
-    if (path && strlen(path) > 0) {
-        FILE* file = fopen(path, "rb");
-        if (file) {
-            fseek(file, 54, SEEK_SET); 
-            u8* file_data = (u8*)malloc(256 * 192 * 3);
-            if (file_data) {
-                fread(file_data, 1, 256 * 192 * 3, file);
-                fclose(file);
-                
-                int ptr = 0;
-                for (int y = 191; y >= 0; y--) {
-                    for (int x = 0; x < 256; x++) {
-                        u8 b = file_data[ptr++];
-                        u8 g = file_data[ptr++];
-                        u8 r = file_data[ptr++];
-                        
-                        if (y >= 24 && y < 168 && x >= 16 && x < 240) {
-                            offscreen[y * 256 + x] = RGB15(r >> 3, g >> 3, b >> 3) | BIT(15);
-                        }
-                    }
-                }
-                free(file_data);
-            } else {
-                fclose(file);
-            }
-        }
-    }
-
-    // 3. Draw Dynamic Name Text
     if (name_str) {
-        char upper_name[64];
+        draw_rounded_box(screen, 56, 54, 144, 108, 8, RGB15(28, 29, 27), RGB15(28, 29, 27));
+        print_string_embedded("NO PHOTO YET", 92, 102, screen);
+        FILE* file = path && *path ? fopen(path, "rb") : NULL;
+        if (file) {
+            u8* data = malloc(256 * 192 * 3);
+            fseek(file, 54, SEEK_SET);
+            if (data && fread(data, 1, 256 * 192 * 3, file) == 256 * 192 * 3) {
+                for (int y = 0; y < 108; y++) for (int x = 0; x < 144; x++) {
+                    int cx = x < 7 ? 6 - x : (x >= 137 ? x - 137 : 0);
+                    int cy = y < 7 ? 6 - y : (y >= 101 ? y - 101 : 0);
+                    if (cx * cx + cy * cy > 49) continue;
+                    int ptr = ((191 - y * 192 / 108) * 256 + x * 256 / 144) * 3;
+                    screen[(54 + y) * 256 + 56 + x] =
+                        RGB15(data[ptr + 2] >> 3, data[ptr + 1] >> 3, data[ptr] >> 3) | BIT(15);
+                }
+            }
+            free(data);
+            fclose(file);
+        }
         int len = strlen(name_str);
-        for(int i = 0; i < len; i++) upper_name[i] = toupper((unsigned char)name_str[i]);
-        upper_name[len] = '\0';
-
-        int text_width = len * 6;
-        int start_x = (256 - text_width) / 2;
-        if (start_x < 0) start_x = 0;
-
-        print_string_embedded(upper_name, start_x, 12, offscreen);
+        if (len > 36) len = 36;
+        print_text_fit(name_str, (256 - len * 6) / 2, 166, 36, screen, RGB15(4, 5, 8), 1);
     } else {
-        const char* msg = "READY TO ADD NEW USER";
-        int len = strlen(msg);
-        int text_width = len * 6; 
-        int start_x = (256 - text_width) / 2;
-        
-        print_string_embedded(msg, start_x, 12, offscreen);
+        // A tiny original pixel spark gives the empty card a game-like focal point.
+        draw_rounded_box(screen, 106, 57, 44, 36, 9, RGB15(31, 26, 3), RGB15(4, 5, 8));
+        print_text("+", 122, 68, screen, RGB15(4, 5, 8), 2);
+        print_text("A NEW FRIEND!", 50, 105, screen, RGB15(4, 5, 8), 2);
+        print_string_embedded("SCAN. SNAP. MAKE YOUR MARK.", 50, 132, screen);
+        print_string_embedded("A / TAP TO START", 80, 155, screen);
     }
-
-    // 4. Draw "HACK THE DEX"
-    const char* dex_msg = "HACK THE DEX";
-    int dex_len = strlen(dex_msg);
-    int dex_x = 256 - (dex_len * 6) - 3; 
-    int dex_y = 192 - 8 - 3;              
-    
-    print_string_embedded(dex_msg, dex_x, dex_y, offscreen);
-
-    dmaCopy(offscreen, vram, 256 * 192 * 2);
-    free(offscreen);
+    dmaCopy(screen, vram, 256 * 192 * sizeof(u16));
+    free(screen);
 }
 
-// ---------------------------------------------------------
-// Bottom Screen Menu Renderer (Bitmap Mode)
-// ---------------------------------------------------------
 void update_bottom_screen(u16* vram) {
-    u16* offscreen = (u16*)malloc(256 * 192 * 2);
-    if (!offscreen) return;
-
-    for (int i = 0; i < 256 * 192; i++) {
-        offscreen[i] = GB_BG_COLOR | BIT(15);
+    u16* screen = malloc(256 * 192 * sizeof(u16));
+    if (!screen) return;
+    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 30, 25) | BIT(15);
+    print_text("FRIEND DEX", 12, 9, screen, RGB15(4, 5, 8), 2);
+    char count[16];
+    snprintf(count, sizeof(count), "%02d FOUND", num_users);
+    draw_rounded_box(screen, 178, 6, 70, 22, 7, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_string_embedded(count, 189, 14, screen);
+    for (int i = 0; i < MENU_VISIBLE_ROWS; i++) {
+        int idx = scroll_offset + i;
+        if (idx >= num_users + 1) break;
+        int y = 34 + i * 25;
+        bool selected = idx == selected_index;
+        draw_rounded_box(screen, 8, y + 2, 232, 22, 6, RGB15(4, 5, 8), RGB15(4, 5, 8));
+        draw_rounded_box(screen, 8, y, 232, 22, 6,
+                         selected ? RGB15(31, 26, 3) : RGB15(31, 31, 30), RGB15(4, 5, 8));
+        print_string_embedded(selected ? ">" : (idx == 0 ? "+" : "*"), 17, y + 7, screen);
+        print_text_fit(idx == 0 ? "ADD NEW FRIEND" : users[idx - 1].name,
+                       32, y + 7, 31, screen, RGB15(4, 5, 8), 1);
     }
-
-    int total_items = num_users + 1;
-    int max_visible = 14; 
-    int start_y = 12;
-    int line_height = 12;
-
-    for (int i = 0; i < max_visible; i++) {
-        int item_idx = scroll_offset + i;
-        if (item_idx >= total_items) break;
-
-        char line_buf[64];
-        const char* name_target = (item_idx == 0) ? "ADD NEW USER" : users[item_idx - 1].name;
-
-        if (item_idx == selected_index) {
-            snprintf(line_buf, sizeof(line_buf), "-> %s", name_target);
-        } else {
-            snprintf(line_buf, sizeof(line_buf), "   %s", name_target);
-        }
-
-        print_string_embedded(line_buf, 16, start_y + (i * line_height), offscreen);
+    if (num_users + 1 > MENU_VISIBLE_ROWS) {
+        draw_rounded_box(screen, 244, 34, 5, 122, 2, RGB15(26, 25, 21), RGB15(26, 25, 21));
+        int thumb_y = 34 + scroll_offset * 104 / (num_users + 1 - MENU_VISIBLE_ROWS);
+        draw_rounded_box(screen, 244, thumb_y, 5, 18, 2, RGB15(4, 5, 8), RGB15(4, 5, 8));
     }
-
-    dmaCopy(offscreen, vram, 256 * 192 * 2);
-    free(offscreen);
+    print_string_embedded("UP/DOWN SELECT   A OPEN", 12, 164, screen);
+    print_string_embedded("X DELETE    START EXIT", 12, 179, screen);
+    dmaCopy(screen, vram, 256 * 192 * sizeof(u16));
+    free(screen);
 }
 
 // ---------------------------------------------------------
@@ -435,14 +423,28 @@ int main(int argc, char* argv[]) {
         int keys_repeat = keysDownRepeat();
         int keys_once = keysDown();
 
+        if (keys_once & KEY_TOUCH) {
+            touchPosition touch;
+            touchRead(&touch);
+            if (touch.px >= 8 && touch.px < 240 && touch.py >= 34 && touch.py < 159) {
+                int row = (touch.py - 34) / 25;
+                int tapped = scroll_offset + row;
+                if ((touch.py - 34) % 25 < 22 && tapped < total_items) {
+                    if (selected_index == tapped) keys_once |= KEY_A;
+                    selected_index = tapped;
+                }
+            }
+        }
         if (keys_repeat & KEY_UP) selected_index--;
         if (keys_repeat & KEY_DOWN) selected_index++;
 
         if (selected_index < 0) selected_index = total_items - 1;
         if (selected_index >= total_items) selected_index = 0;
 
+        int max_scroll = total_items > MENU_VISIBLE_ROWS ? total_items - MENU_VISIBLE_ROWS : 0;
+        if (scroll_offset > max_scroll) scroll_offset = max_scroll;
         if (selected_index < scroll_offset) scroll_offset = selected_index;
-        else if (selected_index >= scroll_offset + 14) scroll_offset = selected_index - 14 + 1;
+        else if (selected_index >= scroll_offset + MENU_VISIBLE_ROWS) scroll_offset = selected_index - MENU_VISIBLE_ROWS + 1;
 
         if (selected_index != prev_index) {
             if (selected_index > 0) {

@@ -4,108 +4,12 @@
 #include <string.h>
 #include <ctype.h>
 
-// Crisp 5x7 Embedded Font (Left-aligned in 8 bits)
-static const u8 font5x7[64][8] = {
-  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 32  
-  {0x20,0x20,0x20,0x20,0x20,0x00,0x20,0x00}, // 33 !
-  {0x50,0x50,0x50,0x00,0x00,0x00,0x00,0x00}, // 34 "
-  {0x50,0xF8,0x50,0xF8,0x50,0x00,0x00,0x00}, // 35 #
-  {0x20,0x78,0xA0,0x70,0x28,0xF0,0x20,0x00}, // 36 $
-  {0xC0,0xC8,0x10,0x20,0x40,0x98,0x18,0x00}, // 37 %
-  {0x40,0xA0,0x40,0xA8,0x90,0x68,0x00,0x00}, // 38 &
-  {0x60,0x20,0x40,0x00,0x00,0x00,0x00,0x00}, // 39 '
-  {0x10,0x20,0x40,0x40,0x40,0x20,0x10,0x00}, // 40 (
-  {0x40,0x20,0x10,0x10,0x10,0x20,0x40,0x00}, // 41 )
-  {0x00,0x20,0x70,0xF8,0x70,0x20,0x00,0x00}, // 42 *
-  {0x00,0x20,0x20,0xF8,0x20,0x20,0x00,0x00}, // 43 +
-  {0x00,0x00,0x00,0x00,0x00,0x60,0x20,0x40}, // 44 ,
-  {0x00,0x00,0x00,0xF8,0x00,0x00,0x00,0x00}, // 45 -
-  {0x00,0x00,0x00,0x00,0x00,0x60,0x60,0x00}, // 46 .
-  {0x00,0x08,0x10,0x20,0x40,0x80,0x00,0x00}, // 47 /
-  {0x70,0x88,0x98,0xA8,0xC8,0x88,0x70,0x00}, // 48 0
-  {0x20,0x60,0x20,0x20,0x20,0x20,0x70,0x00}, // 49 1
-  {0x70,0x88,0x08,0x10,0x20,0x40,0xF8,0x00}, // 50 2
-  {0x70,0x88,0x08,0x30,0x08,0x88,0x70,0x00}, // 51 3
-  {0x10,0x30,0x50,0x90,0xF8,0x10,0x10,0x00}, // 52 4
-  {0xF8,0x80,0xF0,0x08,0x08,0x88,0x70,0x00}, // 53 5
-  {0x30,0x40,0x80,0xF0,0x88,0x88,0x70,0x00}, // 54 6
-  {0xF8,0x08,0x10,0x20,0x40,0x40,0x40,0x00}, // 55 7
-  {0x70,0x88,0x88,0x70,0x88,0x88,0x70,0x00}, // 56 8
-  {0x70,0x88,0x88,0x78,0x08,0x10,0x60,0x00}, // 57 9
-  {0x00,0x60,0x60,0x00,0x60,0x60,0x00,0x00}, // 58 :
-  {0x00,0x60,0x60,0x00,0x60,0x20,0x40,0x00}, // 59 ;
-  {0x10,0x20,0x40,0x80,0x40,0x20,0x10,0x00}, // 60 <
-  {0x00,0x00,0xF8,0x00,0xF8,0x00,0x00,0x00}, // 61 =
-  {0x40,0x20,0x10,0x08,0x10,0x20,0x40,0x00}, // 62 >
-  {0x70,0x88,0x08,0x10,0x20,0x00,0x20,0x00}, // 63 ?
-  {0x70,0x88,0x88,0xA8,0xB8,0x80,0x70,0x00}, // 64 @
-  {0x70,0x88,0x88,0xF8,0x88,0x88,0x88,0x00}, // 65 A
-  {0xF0,0x88,0x88,0xF0,0x88,0x88,0xF0,0x00}, // 66 B
-  {0x70,0x88,0x80,0x80,0x80,0x88,0x70,0x00}, // 67 C
-  {0xF0,0x88,0x88,0x88,0x88,0x88,0xF0,0x00}, // 68 D
-  {0xF8,0x80,0x80,0xF0,0x80,0x80,0xF8,0x00}, // 69 E
-  {0xF8,0x80,0x80,0xF0,0x80,0x80,0x80,0x00}, // 70 F
-  {0x70,0x88,0x80,0xB8,0x88,0x88,0x70,0x00}, // 71 G
-  {0x88,0x88,0x88,0xF8,0x88,0x88,0x88,0x00}, // 72 H
-  {0x70,0x20,0x20,0x20,0x20,0x20,0x70,0x00}, // 73 I
-  {0x08,0x08,0x08,0x08,0x88,0x88,0x70,0x00}, // 74 J
-  {0x88,0x90,0xA0,0xC0,0xA0,0x90,0x88,0x00}, // 75 K
-  {0x80,0x80,0x80,0x80,0x80,0x80,0xF8,0x00}, // 76 L
-  {0x88,0xD8,0xA8,0x88,0x88,0x88,0x88,0x00}, // 77 M
-  {0x88,0x88,0xC8,0xA8,0x98,0x88,0x88,0x00}, // 78 N
-  {0x70,0x88,0x88,0x88,0x88,0x88,0x70,0x00}, // 79 O
-  {0xF0,0x88,0x88,0xF0,0x80,0x80,0x80,0x00}, // 80 P
-  {0x70,0x88,0x88,0x88,0xA8,0x90,0x68,0x00}, // 81 Q
-  {0xF0,0x88,0x88,0xF0,0xA0,0x90,0x88,0x00}, // 82 R
-  {0x70,0x88,0x80,0x70,0x08,0x88,0x70,0x00}, // 83 S
-  {0xF8,0x20,0x20,0x20,0x20,0x20,0x20,0x00}, // 84 T
-  {0x88,0x88,0x88,0x88,0x88,0x88,0x70,0x00}, // 85 U
-  {0x88,0x88,0x88,0x88,0x88,0x50,0x20,0x00}, // 86 V
-  {0x88,0x88,0x88,0xA8,0xA8,0xD8,0x88,0x00}, // 87 W
-  {0x88,0x88,0x50,0x20,0x50,0x88,0x88,0x00}, // 88 X
-  {0x88,0x88,0x50,0x20,0x20,0x20,0x20,0x00}, // 89 Y
-  {0xF8,0x08,0x10,0x20,0x40,0x80,0xF8,0x00}, // 90 Z
-  {0x60,0x40,0x40,0x40,0x40,0x40,0x60,0x00}, // 91 [
-  {0x00,0x80,0x40,0x20,0x10,0x08,0x00,0x00}, // 92 
-  {0x30,0x10,0x10,0x10,0x10,0x10,0x30,0x00}, // 93 ]
-  {0x20,0x50,0x88,0x00,0x00,0x00,0x00,0x00}, // 94 ^
-  {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xF8}  // 95 _
-};
-
-static void print_string(const char* str, int x, int y, u16* offscreen) {
-    if (!str) return;
-    int curr_x = x;
-    for (int i = 0; str[i] != '\0'; i++) {
-        char c = toupper((unsigned char)str[i]);
-        if (c < 32 || c > 95) c = 32;
-        int char_index = c - 32;
-
-        for (int ty = 0; ty < 8; ty++) {
-            u8 row = font5x7[char_index][ty];
-            for (int tx = 0; tx < 5; tx++) {
-                if (row & (1 << (7 - tx))) {
-                    int px = curr_x + tx;
-                    int py = y + ty;
-                    if (px >= 0 && px < 256 && py >= 0 && py < 192) {
-                        offscreen[py * 256 + px] = GB_TEXT_COLOR | BIT(15);
-                    }
-                }
-            }
-        }
-        curr_x += 6;
-    }
-}
+#include "drawing.h"
 
 static void draw_scaled_bmp_box(const char* path, u16* offscreen, int bx, int by, int bw, int bh) {
-    for (int y = by - 1; y <= by + bh; y++) {
-        for (int x = bx - 1; x <= bx + bw; x++) {
-            if (y == by - 1 || y == by + bh || x == bx - 1 || x == bx + bw) {
-                if (x >= 0 && x < 256 && y >= 0 && y < 192) {
-                    offscreen[y * 256 + x] = GB_TEXT_COLOR | BIT(15);
-                }
-            }
-        }
-    }
+    draw_rounded_box(offscreen, bx - 3, by - 3, bw + 6, bh + 6, 8,
+                     RGB15(31, 31, 30), RGB15(4, 5, 8));
+    print_string_embedded("NO IMAGE", bx + (bw - 48) / 2, by + bh / 2, offscreen);
 
     if (!path || strlen(path) == 0) return;
     FILE* file = fopen(path, "rb");
@@ -118,11 +22,18 @@ static void draw_scaled_bmp_box(const char* path, u16* offscreen, int bx, int by
         return;
     }
     
-    fread(file_data, 1, 256 * 192 * 3, file);
+    if (fread(file_data, 1, 256 * 192 * 3, file) != 256 * 192 * 3) {
+        fclose(file);
+        free(file_data);
+        return;
+    }
     fclose(file);
 
     for (int dy = 0; dy < bh; dy++) {
         for (int dx = 0; dx < bw; dx++) {
+            int cx = dx < 5 ? 4 - dx : (dx >= bw - 5 ? dx - (bw - 5) : 0);
+            int cy = dy < 5 ? 4 - dy : (dy >= bh - 5 ? dy - (bh - 5) : 0);
+            if (cx * cx + cy * cy > 25) continue;
             int sx = (dx * 256) / bw;
             int sy_bmp = 191 - ((dy * 192) / bh);
             
@@ -141,67 +52,65 @@ static void draw_scaled_bmp_box(const char* path, u16* offscreen, int bx, int by
     free(file_data);
 }
 
+// Full-width rows wrap long handles instead of painting over the portrait.
+static void social_row(u16* screen, int y, const char* label, const char* value, u16 brand) {
+    draw_rounded_box(screen, 8, y, 240, 32, 6, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    print_text(label, 18, y + 4, screen, brand, 1);
+    if (!value[0]) {
+        print_text("Not shared", 18, y + 16, screen, RGB15(12, 13, 14), 1);
+        return;
+    }
+    char line[37];
+    snprintf(line, sizeof(line), "%.36s", value);
+    print_string_embedded(line, 18, y + 14, screen);
+    if (strlen(value) > 36) print_string_embedded(value + 36, 18, y + 22, screen);
+}
+
 void show_profile_view(DexUser* user, u16* top_vram) {
     videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
+    u16* top = malloc(256 * 192 * sizeof(u16));
+    u16* bottom = malloc(256 * 192 * sizeof(u16));
+    if (!top || !bottom) { free(top); free(bottom); return; }
+    for (int i = 0; i < 256 * 192; i++) top[i] = bottom[i] = RGB15(31, 30, 25) | BIT(15);
 
-    u16* off_top = (u16*)malloc(256 * 192 * 2);
-    u16* off_bot = (u16*)malloc(256 * 192 * 2);
-
-    for (int i = 0; i < 256 * 192; i++) {
-        off_top[i] = GB_BG_COLOR | BIT(15);
-        off_bot[i] = GB_BG_COLOR | BIT(15);
+    draw_rounded_box(top, 8, 7, 240, 27, 8, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_text("FRIEND CARD", 62, 14, top, RGB15(4, 5, 8), 2);
+    if (strlen(user->name) <= 18) {
+        print_text(user->name, 16, 44, top, RGB15(4, 5, 8), 2);
+    } else {
+        char name[37];
+        snprintf(name, sizeof(name), "%.36s", user->name);
+        print_string_embedded(name, 16, 43, top);
+        if (strlen(user->name) > 36) print_string_embedded(user->name + 36, 16, 54, top);
     }
+    print_text_fit(user->pronouns, 16, 68, 36, top, RGB15(12, 13, 14), 1);
+    draw_scaled_bmp_box(user->photo_path, top, 16, 86, 104, 78);
+    draw_scaled_bmp_box(user->signature_path, top, 136, 86, 104, 78);
+    print_string_embedded("PORTRAIT", 44, 175, top);
+    print_string_embedded("THEIR MARK", 158, 175, top);
 
-    // TOP SCREEN
-    int name_width = strlen(user->name) * 6;
-    int name_x = (256 - name_width) / 2;
-    print_string(user->name, name_x, 12, off_top);
-    
-    draw_scaled_bmp_box(user->signature_path, off_top, 32, 40, 192, 112);
-    print_string("HACK THE DEX", 181, 192 - 8 - 3, off_top);
-
-    // BOTTOM SCREEN (Dynamic Fields)
-    int ty = 12;
-
-    if (strlen(user->name) > 0) {
-        print_string("NAME:", 12, ty, off_bot);      ty += 9;
-        print_string(user->name, 18, ty, off_bot);  ty += 13;
-    }
-    if (strlen(user->pronouns) > 0) {
-        print_string("PRONOUNS:", 12, ty, off_bot); ty += 9;
-        print_string(user->pronouns, 18, ty, off_bot); ty += 13;
-    }
-    if (strlen(user->discord) > 0) {
-        print_string("DISCORD:", 12, ty, off_bot);  ty += 9;
-        print_string(user->discord, 18, ty, off_bot); ty += 13;
-    }
-    if (strlen(user->twitter) > 0) {
-        print_string("TWITTER:", 12, ty, off_bot);  ty += 9;
-        print_string(user->twitter, 18, ty, off_bot); ty += 13;
-    }
-    if (strlen(user->instagram) > 0) {
-        print_string("INSTAGRAM:", 12, ty, off_bot); ty += 9;
-        print_string(user->instagram, 18, ty, off_bot); ty += 13;
-    }
-    if (strlen(user->linkedin) > 0) {
-        print_string("LINKEDIN:", 12, ty, off_bot);  ty += 9;
-        print_string(user->linkedin, 18, ty, off_bot); ty += 13;
-    }
-
-    draw_scaled_bmp_box(user->photo_path, off_bot, 140, 40, 100, 100);
-
-    dmaCopy(off_top, top_vram, 256 * 192 * 2);
-    dmaCopy(off_bot, bottom_vram, 256 * 192 * 2);
-    free(off_top);
-    free(off_bot);
-
+    print_text("STAY CONNECTED", 12, 10, bottom, RGB15(4, 5, 8), 2);
+    // Dark brand shades keep small text legible on the warm white cards.
+    social_row(bottom, 32, "DISCORD", user->discord, RGB15(11, 12, 29));
+    social_row(bottom, 66, "TWITTER", user->twitter, RGB15(0, 13, 21));
+    social_row(bottom, 100, "INSTAGRAM", user->instagram, RGB15(23, 4, 10));
+    social_row(bottom, 134, "LINKEDIN", user->linkedin, RGB15(1, 12, 22));
+    draw_rounded_box(bottom, 8, 171, 240, 19, 6, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    print_string_embedded("B  BACK TO YOUR DEX", 74, 177, bottom);
+    dmaCopy(top, top_vram, 256 * 192 * sizeof(u16));
+    dmaCopy(bottom, bottom_vram, 256 * 192 * sizeof(u16));
+    free(top);
+    free(bottom);
     while (1) {
         swiWaitForVBlank();
         scanKeys();
-        if (keysDown() & KEY_B) {
-            break; 
+        if (keysDown() & KEY_B) break;
+        if (keysDown() & KEY_TOUCH) {
+            touchPosition touch;
+            touchRead(&touch);
+            if (touch.px >= 8 && touch.px < 248 && touch.py >= 171 && touch.py < 190) break;
         }
     }
 }
