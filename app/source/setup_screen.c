@@ -45,8 +45,7 @@ static void draw_setup_ui(u16* top_vram, u16* bottom_vram, int active_mode, int 
     print_string_embedded("UP/DOWN    = CHANGE NUMBER", 12, 45, bottom_vram);
     print_string_embedded("LEFT/RIGHT = SELECT NUMBER", 12, 65, bottom_vram);
     
-    print_string_embedded("Y = EDIT HOST NUMBER", 12, 95, bottom_vram);
-    print_string_embedded("X = EDIT PORT", 12, 115, bottom_vram);
+    print_string_embedded("X = TOGGLE HOST/PORT", 12, 95, bottom_vram);
     
     print_string_embedded("A = CONFIRM", 12, 150, bottom_vram);
 }
@@ -65,12 +64,9 @@ void show_setup_screen(u16* top_vram, u16* bottom_vram, int* out_host, int* out_
         scanKeys();
         int keys_down = keysDown();
 
-        if (keys_down & KEY_Y) {
-            active_mode = 0; // Switch to Host
-            draw_setup_ui(top_vram, bottom_vram, active_mode, cursor_pos, host_val, port_digits);
-        }
         if (keys_down & KEY_X) {
-            active_mode = 1; // Switch to Port
+
+            active_mode = !active_mode;
             draw_setup_ui(top_vram, bottom_vram, active_mode, cursor_pos, host_val, port_digits);
         }
 
@@ -104,6 +100,14 @@ void show_setup_screen(u16* top_vram, u16* bottom_vram, int* out_host, int* out_
                 port_digits[cursor_pos] = (port_digits[cursor_pos] - 1 + 10) % 10;
             }
             draw_setup_ui(top_vram, bottom_vram, active_mode, cursor_pos, host_val, port_digits);
+        }
+
+        if (keys_down & KEY_SELECT) {
+
+            // DEFAULT VALUES
+            *out_host = 2;
+            *out_port = 28248;
+            break;
         }
 
         if (keys_down & KEY_A) {

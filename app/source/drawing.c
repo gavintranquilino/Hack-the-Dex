@@ -193,7 +193,7 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
         }
 
         if (keys_down & KEY_DOWN) {
-            size_idx = (size_idx - 1 + NUM_COLORS) % NUM_SIZES;
+            size_idx = (size_idx - 1 + NUM_SIZES) % NUM_SIZES;
             draw_top_ui(top_vram, color_idx, size_idx);
         }
 
