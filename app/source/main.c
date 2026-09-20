@@ -8,9 +8,11 @@
 #include "cJSON.h"
 #include "profile_view.h"
 #include "network_connection.h"
+#include "camera.h"
 #include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "drawing.h"
 
 
 // GameBoy Theme Colors
@@ -181,28 +183,28 @@ void parse_profile(const char* path, DexUser* user) {
         cJSON* item;
 
         item = cJSON_GetObjectItemCaseSensitive(json, "name");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->name, sizeof(user->name), "%.63s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->name, item->valuestring, sizeof(user->name) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "pronouns");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->pronouns, sizeof(user->pronouns), "%.31s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->pronouns, item->valuestring, sizeof(user->pronouns) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "discord");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->discord, sizeof(user->discord), "%.63s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->discord, item->valuestring, sizeof(user->discord) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "twitter");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->twitter, sizeof(user->twitter), "%.63s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->twitter, item->valuestring, sizeof(user->twitter) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "instagram");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->instagram, sizeof(user->instagram), "%.63s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->instagram, item->valuestring, sizeof(user->instagram) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "linkedin");
-        if (cJSON_IsString(item) && item->valuestring)
-            snprintf(user->linkedin, sizeof(user->linkedin), "%.63s", item->valuestring);
+        if (cJSON_IsString(item) && item->valuestring) 
+            strncpy(user->linkedin, item->valuestring, sizeof(user->linkedin) - 1);
 
         item = cJSON_GetObjectItemCaseSensitive(json, "photo");
         if (cJSON_IsString(item) && item->valuestring) 
@@ -403,8 +405,8 @@ int main(int argc, char* argv[]) {
     }
 
     // Clean initialization for both screens as Bitmaps (Mode 5)
-    videoSetMode(MODE_5_2D);
-    videoSetModeSub(MODE_5_2D);
+    videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
+    videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
 
     vramSetBankA(VRAM_A_MAIN_BG);
     vramSetBankC(VRAM_C_SUB_BG);
@@ -415,22 +417,9 @@ int main(int argc, char* argv[]) {
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
 
-    // Bitmap layers become visible immediately, so initialize the complete VRAM
-    // buffers before the first scanout instead of waiting for the main loop.
-    u16 clear_color = GB_BG_COLOR | BIT(15);
-    dmaFillHalfWords(clear_color, top_vram, 256 * 256 * 2);
-    dmaFillHalfWords(clear_color, bottom_vram, 256 * 256 * 2);
-
     keysSetRepeat(25, 5); 
     load_users();
     int total_items = num_users + 1;
-
-    display_photo(NULL, NULL, top_vram);
-    update_bottom_screen(bottom_vram);
-    prev_index = selected_index;
-
-    videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
-    videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
 
     while (1) {
         swiWaitForVBlank();
@@ -468,9 +457,14 @@ int main(int argc, char* argv[]) {
                 char timestamp_str[32];
                 strftime(timestamp_str, sizeof(timestamp_str), "%Y%m%d_%H%M%S", info);
 
+                char photo_path[512];
+                char signature_path[512]; // ADDED
+
 #ifdef EMU
                 // Pre-create sd:/hackthedex/emulator in the SD image. MelonDS does not
                 // reliably support runtime directory creation through its SD backend.
+                snprintf(photo_path, sizeof(photo_path), "%s/photo.bmp", PROFILE_DIR);
+                snprintf(signature_path, sizeof(signature_path), "%s/signature.bmp", PROFILE_DIR); // ADDED
 #else
                 char dir_path[512];
                 snprintf(dir_path, sizeof(dir_path), "%s/%s", ROOT_DIR, timestamp_str);
@@ -478,21 +472,21 @@ int main(int argc, char* argv[]) {
                 if (!ensure_directory(ROOT_DIR) || !ensure_directory(dir_path)) {
                     continue;
                 }
+                snprintf(photo_path, sizeof(photo_path), "%s/photo.bmp", dir_path);
+                snprintf(signature_path, sizeof(signature_path), "%s/signature.bmp", dir_path); // ADDED
 #endif
 
                 // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
                 int status = show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
 
                 if (status == 0) {
-
-                    // then do future functions
-                    int gurt = 1;
-
+                    if (show_camera_capture(top_vram, bottom_vram, photo_path)) {
+                        if (show_drawing_capture(top_vram, bottom_vram, signature_path)) {
+                            load_users();
+                            total_items = num_users + 1;
+                        }
+                    }
                 }
-
-                // 4. Reload users so the folder appears on the home screen
-                load_users();
-                total_items = num_users + 1;
 
                 // --- RETURN RECOVERY ---
                 videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
