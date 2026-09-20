@@ -314,16 +314,17 @@ void print_string_embedded(const char* text, int x, int y, u16* screen) {
 void display_photo(const char* path, const char* name_str, u16* vram) {
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
-    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 30, 25) | BIT(15);
+    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 31, 31) | BIT(15);
+    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
     draw_rounded_box(screen, 8, 10, 240, 32, 9, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 7, 240, 32, 9, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 7, 240, 32, 9, RGB15(31, 21, 21), RGB15(4, 5, 8));
     print_text("HACK THE DEX", 24, 16, screen, RGB15(4, 5, 8), 2);
     print_string_embedded("+", 226, 20, screen);
     draw_rounded_box(screen, 8, 49, 240, 132, 10, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 46, 240, 132, 10, RGB15(31, 31, 30), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 8, 46, 240, 132, 10, RGB15(31, 31, 31), RGB15(4, 5, 8));
 
     if (name_str) {
-        draw_rounded_box(screen, 56, 54, 144, 108, 8, RGB15(28, 29, 27), RGB15(28, 29, 27));
+        draw_rounded_box(screen, 56, 54, 144, 108, 8, RGB15(22, 27, 31), RGB15(22, 27, 31));
         print_string_embedded("NO PHOTO YET", 92, 102, screen);
         FILE* file = path && *path ? fopen(path, "rb") : NULL;
         if (file) {
@@ -347,7 +348,7 @@ void display_photo(const char* path, const char* name_str, u16* vram) {
         print_text_fit(name_str, (256 - len * 6) / 2, 166, 36, screen, RGB15(4, 5, 8), 1);
     } else {
         // A tiny original pixel spark gives the empty card a game-like focal point.
-        draw_rounded_box(screen, 106, 57, 44, 36, 9, RGB15(31, 26, 3), RGB15(4, 5, 8));
+        draw_rounded_box(screen, 106, 57, 44, 36, 9, RGB15(23, 29, 23), RGB15(4, 5, 8));
         print_text("+", 122, 68, screen, RGB15(4, 5, 8), 2);
         print_text("A NEW FRIEND!", 50, 105, screen, RGB15(4, 5, 8), 2);
         print_string_embedded("SCAN. SNAP. MAKE YOUR MARK.", 50, 132, screen);
@@ -360,11 +361,12 @@ void display_photo(const char* path, const char* name_str, u16* vram) {
 void update_bottom_screen(u16* vram) {
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
-    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 30, 25) | BIT(15);
-    print_text("FRIEND DEX", 12, 9, screen, RGB15(4, 5, 8), 2);
+    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 31, 31) | BIT(15);
+    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
+    print_text("FRIEND DEX", 12, 9, screen, RGB15(21, 5, 7), 2);
     char count[16];
     snprintf(count, sizeof(count), "%02d FOUND", num_users);
-    draw_rounded_box(screen, 178, 6, 70, 22, 7, RGB15(31, 26, 3), RGB15(4, 5, 8));
+    draw_rounded_box(screen, 178, 6, 70, 22, 7, RGB15(31, 29, 19), RGB15(4, 5, 8));
     print_string_embedded(count, 189, 14, screen);
     for (int i = 0; i < MENU_VISIBLE_ROWS; i++) {
         int idx = scroll_offset + i;
@@ -373,13 +375,13 @@ void update_bottom_screen(u16* vram) {
         bool selected = idx == selected_index;
         draw_rounded_box(screen, 8, y + 2, 232, 22, 6, RGB15(4, 5, 8), RGB15(4, 5, 8));
         draw_rounded_box(screen, 8, y, 232, 22, 6,
-                         selected ? RGB15(31, 26, 3) : RGB15(31, 31, 30), RGB15(4, 5, 8));
+                         selected ? RGB15(31, 21, 21) : RGB15(31, 31, 31), RGB15(4, 5, 8));
         print_string_embedded(selected ? ">" : (idx == 0 ? "+" : "*"), 17, y + 7, screen);
         print_text_fit(idx == 0 ? "ADD NEW FRIEND" : users[idx - 1].name,
                        32, y + 7, 31, screen, RGB15(4, 5, 8), 1);
     }
     if (num_users + 1 > MENU_VISIBLE_ROWS) {
-        draw_rounded_box(screen, 244, 34, 5, 122, 2, RGB15(26, 25, 21), RGB15(26, 25, 21));
+        draw_rounded_box(screen, 244, 34, 5, 122, 2, RGB15(29, 29, 29), RGB15(29, 29, 29));
         int thumb_y = 34 + scroll_offset * 104 / (num_users + 1 - MENU_VISIBLE_ROWS);
         draw_rounded_box(screen, 244, thumb_y, 5, 18, 2, RGB15(4, 5, 8), RGB15(4, 5, 8));
     }
