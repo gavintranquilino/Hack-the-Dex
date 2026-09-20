@@ -27,7 +27,8 @@ extern int global_port_number;
 #define FRAME_PIXELS (256 * 192)
 #define CAMERA_NDMA_CHANNEL 1
 #define CAMERA_TIMEOUT_FRAMES (60 * 3)
-#define WIFI_TIMEOUT_FRAMES (60 * 30)
+// Do not leave the scanner stuck on a stale DHCP/association state.
+#define WIFI_TIMEOUT_FRAMES (60 * 1)
 // web/main.py can spend 40 seconds retrieving the profile.
 #define NETWORK_TIMEOUT_FRAMES (60 * 60)
 #define MAX_PROFILE_BYTES (16 * 1024)
@@ -276,6 +277,8 @@ static bool connect_wifi(Scanner *scanner) {
     }
     int status = Wifi_AssocStatus();
     scanner_statusf(scanner, "WI-FI STATUS %d", status);
+    if (status == ASSOCSTATUS_CANNOTCONNECT)
+        scanner_status(scanner, "STATUS 6. WAIT FOR WI-FI TIMEOUT");
     if (status == ASSOCSTATUS_ASSOCIATED) {
         scanner_status(scanner, "WI-FI ASSOCIATED");
         return true;
@@ -291,8 +294,10 @@ static bool connect_wifi(Scanner *scanner) {
             scanner_status(scanner, "WI-FI ASSOCIATED");
             return true;
         }
-        if (status == ASSOCSTATUS_CANNOTCONNECT)
+        if (status == ASSOCSTATUS_CANNOTCONNECT) {
+            scanner_status(scanner, "STATUS 6. WAIT FOR WI-FI TIMEOUT");
             break;
+        }
     }
     scanner_statusf(scanner, "WI-FI FAILED S=%d", status);
     return false;
@@ -399,6 +404,22 @@ static bool save_dummy_profile(const char *json_path, const char *timestamp_str)
         timestamp_str ? timestamp_str : "TEST");
     return length >= 0 && (size_t)length < sizeof(dummy_profile) &&
            save_profile(json_path, dummy_profile, (size_t)length);
+}
+
+static bool shutdown_wifi(Scanner *scanner) {
+    if (!Wifi_CheckInit())
+        return true;
+
+    scanner_status(scanner, "STOPPING WI-FI...");
+    Wifi_DisconnectAP();
+    swiWaitForVBlank();
+    Wifi_DisableWifi();
+    swiWaitForVBlank();
+    swiWaitForVBlank();
+    // BlocksDS cannot deinitialize the Internet-mode lwIP/1wIP stack.
+    // Leave DSWiFi initialized, but with the AP and radio disabled.
+    scanner_status(scanner, "WI-FI RADIO STOPPED");
+    return true;
 }
 
 static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
@@ -509,34 +530,22 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
 
     dmaFillHalfWords(GB_BG_COLOR | BIT(15), top_vram, FRAME_PIXELS * sizeof(u16));
     if (usable) {
-        if (Wifi_CheckInit()) {
+        bool wifi_initialized = Wifi_CheckInit();
+        if (wifi_initialized) {
             scanner_status(&scanner, "RESETTING WI-FI...");
-            Wifi_DisconnectAP();
-            int wifi_status = Wifi_AssocStatus();
-            for (int frames = 0;
-                 wifi_status != ASSOCSTATUS_DISCONNECTED && frames < 60;
-                 frames++) {
-                swiWaitForVBlank();
-                wifi_status = Wifi_AssocStatus();
-            }
-            if (wifi_status != ASSOCSTATUS_DISCONNECTED) {
-                scanner_statusf(&scanner, "WI-FI RELEASE FAILED S=%d", wifi_status);
-                scanner.cancelled = true;
-            }
-            if (!scanner.cancelled) {
-                Wifi_DisableWifi();
-                swiWaitForVBlank();
-                swiWaitForVBlank();
-                if (!Wifi_Deinit()) {
-                    scanner_status(&scanner, "WI-FI RESET FAILED");
-                    scanner.cancelled = true;
-                }
-            }
+            shutdown_wifi(&scanner);
+            wifi_initialized = Wifi_CheckInit();
         }
-        if (!scanner.cancelled &&
-            !Wifi_InitDefault(WFC_CONNECT | WIFI_ATTEMPT_DSI_MODE))
-            scanner_statusf(&scanner, "WI-FI INIT FAILED E=%d", errno);
-        else if (!scanner.cancelled && connect_wifi(&scanner))
+        if (!wifi_initialized) {
+            if (!Wifi_InitDefault(WFC_CONNECT | WIFI_ATTEMPT_DSI_MODE))
+                scanner_statusf(&scanner, "WI-FI INIT FAILED E=%d", errno);
+            else
+                wifi_initialized = true;
+        } else {
+            Wifi_EnableWifi();
+            swiWaitForVBlank();
+        }
+        if (wifi_initialized && connect_wifi(&scanner))
             start_camera(&scanner);
     }
     if (usable && !scanner.camera_ready && !scanner.cancelled)
@@ -598,6 +607,7 @@ int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* 
     }
 
     stop_camera(&scanner);
+    shutdown_wifi(&scanner);
     free(grayscale);
     return result;
 }
