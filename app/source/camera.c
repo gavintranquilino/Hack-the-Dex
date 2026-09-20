@@ -43,10 +43,26 @@ static int save_picture(const char* path, const u16* vram_data) {
     return 1;
 }
 
+// Draw the static UI on the bottom screen
 static void draw_controls(u16* vram, const char* first, const char* second) {
     dmaFillHalfWords(GB_BG_COLOR | BIT(15), vram, CAMERA_WIDTH * CAMERA_HEIGHT * 2);
+    
+    // Title
+    const char* title_msg = "TAKE A PHOTO";
+    int title_len = strlen(title_msg);
+    int title_x = (256 - (title_len * 6)) / 2;
+    print_string_embedded(title_msg, title_x, 12, vram);
+
+    // Button Prompts
     print_string_embedded(first, 12, 55, vram);
     print_string_embedded(second, 12, 75, vram);
+
+    // Watermark
+    const char* dex_msg = "HACK THE DEX";
+    int dex_len = strlen(dex_msg);
+    int dex_x = 256 - (dex_len * 6) - 3; 
+    int dex_y = 192 - 8 - 3;              
+    print_string_embedded(dex_msg, dex_x, dex_y, vram);
 }
 
 int show_camera_capture(u16* top_vram, u16* bottom_vram, const char* photo_path) {
@@ -61,24 +77,12 @@ int show_camera_capture(u16* top_vram, u16* bottom_vram, const char* photo_path)
 
     int saved = 0;
 
-    // Direct hardware loop - zero mallocs, zero memcpy bottlenecks
     while (!saved) {
         swiWaitForVBlank();
         
         // 1. NDMA streams the camera feed directly into top_vram
+        // The text stamping is completely removed from here
         cameraStartTransfer(top_vram, MCUREG_APT_SEQ_CMD_PREVIEW, 1);
-
-        // 2. Stamp the text directly onto top_vram over the new video frame
-        const char* title_msg = "TAKE A PHOTO";
-        int title_len = strlen(title_msg);
-        int title_x = (256 - (title_len * 6)) / 2;
-        print_string_embedded(title_msg, title_x, 12, top_vram);
-
-        const char* dex_msg = "HACK THE DEX";
-        int dex_len = strlen(dex_msg);
-        int dex_x = 256 - (dex_len * 6) - 3; 
-        int dex_y = 192 - 8 - 3;              
-        print_string_embedded(dex_msg, dex_x, dex_y, top_vram);
 
         scanKeys();
         int keys = keysDown();
@@ -91,8 +95,6 @@ int show_camera_capture(u16* top_vram, u16* bottom_vram, const char* photo_path)
         if (keys & KEY_A) {
             draw_controls(bottom_vram, "CONFIRM?", "A = YES   B = NO");
 
-            // Entering this loop stops cameraStartTransfer from being called, 
-            // naturally freezing the final frame on the top screen.
             while (1) {
                 swiWaitForVBlank();
                 scanKeys();
@@ -100,13 +102,13 @@ int show_camera_capture(u16* top_vram, u16* bottom_vram, const char* photo_path)
 
                 if (confirm_keys & KEY_A) {
                     save_picture(photo_path, top_vram);
-                    saved = 1; // Breaks the outer loop to return to main.c
+                    saved = 1; 
                     break; 
                 }
 
                 if (confirm_keys & KEY_B) {
                     draw_controls(bottom_vram, "A = TAKE PICTURE", "X = SWITCH CAMERA");
-                    break; // Breaks the inner loop to resume the live feed
+                    break; 
                 }
             }
         }

@@ -144,14 +144,14 @@ static void draw_top_ui(u16* top_vram, int color_idx, int size_idx) {
     print_string_embedded("USE STYLUS TO DRAW", 12, 45, top_vram);
     print_string_embedded("A = CONFIRM", 12, 70, top_vram);
     print_string_embedded("B = CLEAR", 12, 90, top_vram);
-    
-    char color_buf[64];
-    snprintf(color_buf, sizeof(color_buf), "X = CHANGE COLOR (%s)", color_names[color_idx]);
-    print_string_embedded(color_buf, 12, 110, top_vram);
 
     char size_buf[64];
-    snprintf(size_buf, sizeof(size_buf), "Y = BRUSH SIZE (%s)", size_names[size_idx]);
-    print_string_embedded(size_buf, 12, 130, top_vram);
+    snprintf(size_buf, sizeof(size_buf), "UP/DOWN = BRUSH SIZE (%s)", size_names[size_idx]);
+    print_string_embedded(size_buf, 12, 110, top_vram);
+    
+    char color_buf[64];
+    snprintf(color_buf, sizeof(color_buf), "LEFT/RIGHT = CHANGE COLOR (%s)", color_names[color_idx]);
+    print_string_embedded(color_buf, 12, 130, top_vram);
 
     const char* dex_msg = "HACK THE DEX";
     int dex_x = 256 - (strlen(dex_msg) * 6) - 3; 
@@ -177,13 +177,23 @@ int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_
             clear_canvas(bottom_vram);
         }
 
-        if (keys_down & KEY_X) {
+        if (keys_down & KEY_RIGHT) {
             color_idx = (color_idx + 1) % NUM_COLORS;
             draw_top_ui(top_vram, color_idx, size_idx);
         }
 
-        if (keys_down & KEY_Y) {
+        if (keys_down & KEY_LEFT) {
+            color_idx = (color_idx - 1 + NUM_COLORS) % NUM_COLORS;
+            draw_top_ui(top_vram, color_idx, size_idx);
+        }
+
+        if (keys_down & KEY_UP) {
             size_idx = (size_idx + 1) % NUM_SIZES;
+            draw_top_ui(top_vram, color_idx, size_idx);
+        }
+
+        if (keys_down & KEY_DOWN) {
+            size_idx = (size_idx - 1 + NUM_COLORS) % NUM_SIZES;
             draw_top_ui(top_vram, color_idx, size_idx);
         }
 
