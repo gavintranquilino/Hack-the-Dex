@@ -17,8 +17,13 @@
 #define ROOT_DIR "sd:/hackthedex"
 
 // Keep the endpoint and wire format in sync with qr_code_parse.
-#define TARGET_HOST "2.tcp.ngrok.io"
-#define TARGET_PORT "28248"
+
+extern int global_host_number;
+extern int global_port_number;
+
+
+// #define TARGET_HOST "2.tcp.ngrok.io"
+// #define TARGET_PORT "28248"
 #define FRAME_PIXELS (256 * 192)
 #define CAMERA_NDMA_CHANNEL 1
 #define CAMERA_TIMEOUT_FRAMES (60 * 3)
@@ -415,8 +420,14 @@ static bool send_frame(Scanner *scanner, u8 *grayscale, const char *json_path) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
 
-    scanner_statusf(scanner, "DNS %s:%s", TARGET_HOST, TARGET_PORT);
-    if (getaddrinfo(TARGET_HOST, TARGET_PORT, &hints, &address) != 0) {
+    char target_host[64];
+    char target_port[16];
+    snprintf(target_host, sizeof(target_host), "%d.tcp.ngrok.io", global_host_number);
+    snprintf(target_port, sizeof(target_port), "%d", global_port_number);
+
+
+    scanner_statusf(scanner, "DNS %s:%s", target_host, target_port);
+    if (getaddrinfo(target_host, target_port, &hints, &address) != 0) {
         scanner_statusf(scanner, "DNS FAILED E=%d", errno);
         goto done;
     }

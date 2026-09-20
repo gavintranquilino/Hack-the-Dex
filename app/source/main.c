@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "drawing.h"
+#include "setup_screen.h" // ADD THIS
 
 
 // GameBoy Theme Colors
@@ -34,6 +35,10 @@ int num_users = 0;
 int selected_index = 0;
 int scroll_offset = 0;
 int prev_index = -1;
+
+// Global Network Variables (Saved for duration of app)
+int global_host_number = 0;
+int global_port_number = 0;
 
 // ---------------------------------------------------------
 // Crisp 5x7 Embedded Font (ASCII 32 to 95)
@@ -416,6 +421,8 @@ int main(int argc, char* argv[]) {
 
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
+
+    show_setup_screen(top_vram, bottom_vram, &global_host_number, &global_port_number);
 
     keysSetRepeat(25, 5); 
     load_users();
