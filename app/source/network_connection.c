@@ -25,10 +25,10 @@ extern int global_port_number;
 // #define TARGET_PORT "28248"
 #define FRAME_PIXELS (256 * 192)
 #define CAMERA_NDMA_CHANNEL 1
-#define CAMERA_TIMEOUT_FRAMES (60 * 3)
+#define CAMERA_TIMEOUT_FRAMES (60 * 10)
 // Do not leave the scanner stuck on a stale DHCP/association state.
-#define WIFI_TIMEOUT_FRAMES (60 * 1)
-// web/main.py can spend 40 seconds retrieving the profile.
+#define WIFI_TIMEOUT_FRAMES (60 * 10)
+// web/main.py can spend x seconds retrieving the profile.
 #define NETWORK_TIMEOUT_FRAMES (60 * 60)
 #define MAX_PROFILE_BYTES (16 * 1024)
 
