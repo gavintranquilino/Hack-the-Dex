@@ -8,8 +8,11 @@ Tkinter window displays the current ngrok host number and port for the DSi.
 From this directory:
 
 ```bash
-source .venv/bin/activate
-pip install Pillow pyzbar playwright
+# Install libraries
+pip install -r requirements.txt
+
+# Alternative to requirements.txt:
+# pip install Pillow pyzbar playwright
 
 # Install the Playwright browser once:
 playwright install chromium
