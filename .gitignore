@@ -5,6 +5,8 @@ build/
 *.dsi
 *.png
 
+.vscode/
+
 .venv
 
 web/.playwright-profile/
