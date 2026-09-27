@@ -1,0 +1,24 @@
+name: docs
+
+on:
+  push:
+  pull_request:
+    paths:
+      - '**.md'
+      - '**.c'
+      - '**.h'
+      - '**.proto'
+      - '**.py'
+      - 'tools/scripts/acronym-ignore.txt'
+      - '.github/workflows/docs.yml'
+      - 'tools/scripts/check_acronyms.py'
+
+jobs:
+  acronyms:
+    name: acronyms defined in glossary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check acronyms
+        run: python3 tools/scripts/check_acronyms.py
