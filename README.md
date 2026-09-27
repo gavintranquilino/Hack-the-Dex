@@ -62,11 +62,5 @@ DS build.
 ## Project history
 
 Hack the Dex was started on September 19, 2026 for Hack the North 2026. The
-repository grew during the event from BlocksDS and DSi connectivity tests into
-the camera, QR, profile, drawing, and web-proxy workflow. Offline mode and the
-web setup flow were added during the September 20-21 development pass.
-
-## Planned additions
-
-- Sending files through Download Play.
-- A DS mode that removes or reduces the camera-specific content.
+repository grew from a single hackathon project to a passion project
+to use outside of the hackathon. 
