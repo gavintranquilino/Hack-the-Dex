@@ -5,6 +5,9 @@ It turns a DSi into a small social profile exchange: scan a friend's QR code,
 retrieve their Hack the North profile, take a photo, draw a signature, and save
 the resulting profile locally on the SD card.
 
+See the [glossary](GLOSSARY.md) for definitions of project terminology,
+hardware, build tools, networking tools, and data formats.
+
 ## System overview
 
 The project has two cooperating applications:
