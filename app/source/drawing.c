@@ -1,4 +1,5 @@
 #include "drawing.h"
+#include "styles.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -7,34 +8,7 @@
 
 #define CANVAS_WIDTH 256
 #define CANVAS_HEIGHT 192
-#define WHITE (RGB15(31, 31, 31) | BIT(15))
-
-// Clip every primitive to the physical DSi bitmap, including rounded corners.
-static void rounded_fill(u16* screen, int x, int y, int w, int h, int r, u16 color) {
-    if (w <= 0 || h <= 0) return;
-    if (r > w / 2) r = w / 2;
-    if (r > h / 2) r = h / 2;
-    if (r < 0) r = 0;
-    for (int dy = 0; dy < h; dy++) {
-        int py = y + dy;
-        if (py < 0 || py >= 192) continue;
-        for (int dx = 0; dx < w; dx++) {
-            int px = x + dx;
-            if (px < 0 || px >= 256) continue;
-            int cx = dx < r ? r - 1 - dx : (dx >= w - r ? dx - (w - r) : 0);
-            int cy = dy < r ? r - 1 - dy : (dy >= h - r ? dy - (h - r) : 0);
-            if (cx * cx + cy * cy <= r * r)
-                screen[py * 256 + px] = color | BIT(15);
-        }
-    }
-}
-
-void draw_rounded_box(u16* screen, int x, int y, int width, int height,
-                      int radius, u16 fill, u16 border) {
-    rounded_fill(screen, x, y, width, height, radius, border);
-    rounded_fill(screen, x + 2, y + 2, width - 4, height - 4,
-                 radius - 2, fill);
-}
+#define WHITE UI_COLOR_BACKGROUND
 
 static const u16 brush_colors[] = {
     RGB15(31, 0, 0) | BIT(15),   // Red
@@ -164,11 +138,10 @@ static bool save_bmp(const char *path, u16* canvas) {
 }
 
 static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_active) {
-    dmaFillHalfWords(RGB15(31, 31, 31) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
-    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    print_text("MAKE YOUR MARK", 12, 10, screen, RGB15(21, 5, 7), 2);
-    print_string_embedded("01 SCAN > 02 PHOTO > 03 DRAW", 12, 32, screen);
-    draw_rounded_box(screen, 8, 47, 240, 81, 9, RGB15(31, 31, 31), RGB15(4, 5, 8));
+    ui_begin_screen(screen);
+    ui_draw_text(screen, &(UiText){ .value = "MAKE YOUR MARK", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
+    ui_draw_text(screen, &(UiText){ .value = "01 SCAN > 02 PHOTO > 03 DRAW", .x = 12, .y = 32, .color = UI_COLOR_INK, .scale = 1 });
+    ui_draw_card(screen, &(UiCard){ .bounds = { 8, 47, 240, 81 }, .radius = 9, .surface = UI_SURFACE_CARD });
     print_string_embedded("INK", 18, 58, screen);
     print_string_embedded(eraser_active ? "ERASER ON" : color_names[color_idx], 54, 58, screen);
     for (int i = 0; i < NUM_COLORS; i++) {
@@ -180,18 +153,21 @@ static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_act
     print_string_embedded(size_names[size_idx], 54, 114, screen);
     print_string_embedded("X ERASER", 174, 114, screen);
     print_string_embedded("LEFT/RIGHT INK   UP/DOWN SIZE", 12, 139, screen);
-    draw_rounded_box(screen, 8, 156, 150, 25, 7, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 153, 150, 25, 7, RGB15(23, 29, 23), RGB15(4, 5, 8));
-    print_string_embedded("A SAVE DRAWING", 41, 162, screen);
-    draw_rounded_box(screen, 166, 153, 82, 25, 7, RGB15(31, 21, 21), RGB15(4, 5, 8));
-    print_string_embedded("B CLEAR", 186, 162, screen);
+    ui_draw_button(screen, &(UiButton){
+        .card = { .bounds = { 8, 153, 150, 25 }, .radius = 7, .surface = UI_SURFACE_SUCCESS },
+        .label = { .value = "A SAVE DRAWING", .x = 41, .y = 162, .color = UI_COLOR_INK, .scale = 1 }
+    });
+    ui_draw_button(screen, &(UiButton){
+        .card = { .bounds = { 166, 153, 82, 25 }, .radius = 7, .surface = UI_SURFACE_SELECTED },
+        .label = { .value = "B CLEAR", .x = 186, .y = 162, .color = UI_COLOR_INK, .scale = 1 }
+    });
     print_string_embedded("DRAW INSIDE THE FRAME BELOW", 47, 183, screen);
 }
 
 static void clear_drawing(u16* canvas, u16* screen) {
     clear_canvas(canvas);
-    dmaFillHalfWords(RGB15(28, 14, 15) | BIT(15), screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
-    draw_rounded_box(screen, 4, 4, 248, 184, 8, WHITE, RGB15(4, 5, 8));
+    dmaFillHalfWords(UI_COLOR_FRAME, screen, CANVAS_WIDTH * CANVAS_HEIGHT * 2);
+    draw_rounded_box(screen, 4, 4, 248, 184, 8, WHITE, UI_COLOR_INK);
 }
 
 int show_drawing_capture(u16* top_vram, u16* bottom_vram, const char* signature_path) {

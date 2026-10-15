@@ -5,6 +5,7 @@
 #include <ctype.h>
 
 #include "drawing.h"
+#include "styles.h"
 
 static void draw_scaled_bmp_box(const char* path, u16* offscreen, int bx, int by, int bw, int bh) {
     draw_rounded_box(offscreen, bx - 3, by - 3, bw + 6, bh + 6, 8,
@@ -73,11 +74,9 @@ void show_profile_view(DexUser* user, u16* top_vram) {
     u16* top = malloc(256 * 192 * sizeof(u16));
     u16* bottom = malloc(256 * 192 * sizeof(u16));
     if (!top || !bottom) { free(top); free(bottom); return; }
-    for (int i = 0; i < 256 * 192; i++) top[i] = bottom[i] = RGB15(31, 31, 31) | BIT(15);
-
-    draw_rounded_box(top, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    draw_rounded_box(bottom, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    draw_rounded_box(top, 8, 7, 240, 27, 8, RGB15(31, 21, 21), RGB15(4, 5, 8));
+    ui_begin_screen(top);
+    ui_begin_screen(bottom);
+    ui_draw_card(top, &(UiCard){ .bounds = { 8, 7, 240, 27 }, .radius = 8, .surface = UI_SURFACE_SELECTED });
     print_text("FRIEND CARD", 62, 14, top, RGB15(4, 5, 8), 2);
     if (strlen(user->name) <= 18) {
         print_text(user->name, 16, 44, top, RGB15(4, 5, 8), 2);
@@ -93,14 +92,16 @@ void show_profile_view(DexUser* user, u16* top_vram) {
     print_string_embedded("PORTRAIT", 44, 175, top);
     print_string_embedded("THEIR MARK", 158, 175, top);
 
-    print_text("STAY CONNECTED", 12, 10, bottom, RGB15(21, 5, 7), 2);
+    ui_draw_text(bottom, &(UiText){ .value = "STAY CONNECTED", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
     // Dark brand shades keep small text legible on the white cards.
     social_row(bottom, 32, "DISCORD", user->discord, RGB15(11, 12, 29));
     social_row(bottom, 66, "TWITTER", user->twitter, RGB15(0, 13, 21));
     social_row(bottom, 100, "INSTAGRAM", user->instagram, RGB15(23, 4, 10));
     social_row(bottom, 134, "LINKEDIN", user->linkedin, RGB15(1, 12, 22));
-    draw_rounded_box(bottom, 8, 171, 240, 19, 6, RGB15(22, 27, 31), RGB15(4, 5, 8));
-    print_string_embedded("B  BACK TO YOUR DEX", 74, 177, bottom);
+    ui_draw_button(bottom, &(UiButton){
+        .card = { .bounds = { 8, 171, 240, 19 }, .radius = 6, .surface = UI_SURFACE_MUTED },
+        .label = { .value = "B  BACK TO YOUR DEX", .x = 74, .y = 177, .color = UI_COLOR_INK, .scale = 1 }
+    });
     dmaCopy(top, top_vram, 256 * 192 * sizeof(u16));
     dmaCopy(bottom, bottom_vram, 256 * 192 * sizeof(u16));
     free(top);

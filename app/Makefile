@@ -57,4 +57,14 @@ LIBDIRS := $(BLOCKSDS)/libs/dswifi \
 
 ARM7ELF := $(BLOCKSDS)/sys/arm7/main_core/arm7_dswifi_maxmod.elf
 
+# BlocksDS normally places the final ROM beside this Makefile. Keep all
+# distributable ROM variants together at the repository level instead.
+ROM_OUTPUT_DIR := ../app/build/roms
+override ROM := $(ROM_OUTPUT_DIR)/$(NAME).nds
+
 include $(BLOCKSDS)/sys/default_makefiles/rom_arm9/Makefile
+
+$(ROM): | $(ROM_OUTPUT_DIR)
+
+$(ROM_OUTPUT_DIR):
+	mkdir -p $@

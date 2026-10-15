@@ -1,5 +1,6 @@
 #include "offline.h"
 #include "drawing.h"
+#include "styles.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h> // for malloc/free
@@ -52,9 +53,7 @@ static void draw_top(u16* vram, int selected, char values[FIELD_COUNT][FIELD_LEN
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
     
-    dmaFillHalfWords(RGB15(31, 31, 31) | BIT(15), screen, 256 * 192 * 2);
-    draw_rounded_box(screen, 0, 0, 256, 192, 10,
-                     RGB15(31, 31, 31), RGB15(28, 14, 15));
+    ui_begin_screen(screen);
                      
     for (int i = 0; i < FIELD_COUNT; i++)
         draw_field(screen, i, i == selected, values[i]);
@@ -77,10 +76,8 @@ static void draw_bottom(u16* vram, int selected, int kb_mode) {
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
 
-    dmaFillHalfWords(RGB15(31, 31, 31) | BIT(15), screen, 256 * 192 * 2);
-    draw_rounded_box(screen, 0, 0, 256, 192, 10,
-                     RGB15(31, 31, 31), RGB15(28, 14, 15));
-    print_text("ENTER YOUR INFO", 12, 9, screen, RGB15(21, 5, 7), 2);
+    ui_begin_screen(screen);
+    ui_draw_text(screen, &(UiText){ .value = "ENTER YOUR INFO", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
     
     // Adjusted spacing slightly so it doesn't clip off the edges of the 256px screen
     print_string_embedded("UP/DOWN=SELECT FIELD  A=DONE  B=BACK", 20, 31, screen);

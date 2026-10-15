@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "drawing.h"
+#include "styles.h"
 #include "setup_screen.h"
 #include "offline.h"
 
@@ -336,14 +337,11 @@ void print_string_embedded(const char* text, int x, int y, u16* screen) {
 void display_photo(const char* path, const char* name_str, u16* vram) {
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
-    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 31, 31) | BIT(15);
-    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    draw_rounded_box(screen, 8, 10, 240, 32, 9, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 7, 240, 32, 9, RGB15(31, 21, 21), RGB15(4, 5, 8));
+    ui_begin_screen(screen);
+    ui_draw_raised_card(screen, &(UiCard){ .bounds = { 8, 7, 240, 32 }, .radius = 9, .surface = UI_SURFACE_SELECTED });
     print_text("HACK THE DEX", 24, 16, screen, RGB15(4, 5, 8), 2);
     print_string_embedded("+", 226, 20, screen);
-    draw_rounded_box(screen, 8, 49, 240, 132, 10, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 46, 240, 132, 10, RGB15(31, 31, 31), RGB15(4, 5, 8));
+    ui_draw_raised_card(screen, &(UiCard){ .bounds = { 8, 46, 240, 132 }, .radius = 10, .surface = UI_SURFACE_CARD });
 
     if (name_str) {
         draw_rounded_box(screen, 56, 54, 144, 108, 8, RGB15(22, 27, 31), RGB15(22, 27, 31));
@@ -383,9 +381,8 @@ void display_photo(const char* path, const char* name_str, u16* vram) {
 void update_bottom_screen(u16* vram) {
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
-    for (int i = 0; i < 256 * 192; i++) screen[i] = RGB15(31, 31, 31) | BIT(15);
-    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    print_text("FRIEND DEX", 12, 9, screen, RGB15(21, 5, 7), 2);
+    ui_begin_screen(screen);
+    ui_draw_text(screen, &(UiText){ .value = "FRIEND DEX", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
     char count[16];
     snprintf(count, sizeof(count), "%02d FOUND", num_users);
     draw_rounded_box(screen, 178, 6, 70, 22, 7, RGB15(31, 29, 19), RGB15(4, 5, 8));

@@ -1,6 +1,7 @@
 #include "network_connection.h"
 #include "cJSON.h"
 #include "drawing.h"
+#include "styles.h"
 #include <dswifi9.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -54,10 +55,13 @@ typedef struct {
 
 static void draw_scanner_ui(Scanner* scanner, const char* message) {
     u16* screen = scanner->bottom_vram;
-    dmaFillHalfWords(RGB15(31, 31, 31) | BIT(15), screen, FRAME_PIXELS * sizeof(u16));
-    draw_rounded_box(screen, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    print_text("FIND A FRIEND", 12, 10, screen, RGB15(21, 5, 7), 2);
-    print_string_embedded("01 SCAN > 02 PHOTO > 03 DRAW", 12, 32, screen);
+    ui_begin_screen(screen);
+    ui_draw_page_header(screen, &(UiPageHeader){
+        .title = { .value = "FIND A FRIEND", .x = 12, .y = 10,
+                   .color = UI_COLOR_HEADING, .scale = 2 },
+        .hint = { .value = "01 SCAN > 02 PHOTO > 03 DRAW", .x = 12, .y = 32,
+                  .color = UI_COLOR_INK, .scale = 1 }
+    });
     draw_rounded_box(screen, 8, 48, 240, 99, 9, RGB15(31, 31, 31), RGB15(4, 5, 8));
     bool error = strstr(message, "FAILED") || strstr(message, "TIMEOUT") ||
                  strstr(message, "UNAVAILABLE") || strstr(message, "REQUIRED");
@@ -72,11 +76,13 @@ static void draw_scanner_ui(Scanner* scanner, const char* message) {
     for (int i = first; i < scanner->log_count - 1; i++)
         print_text_fit(scanner->log_lines[i], 18, 104 + (i - first) * 12, 36,
                        screen, RGB15(12, 13, 14), 1);
-    draw_rounded_box(screen, 8, 155, 150, 24, 7, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(screen, 8, 152, 150, 24, 7,
-                     scanner->busy ? RGB15(31, 29, 19) : RGB15(22, 27, 31), RGB15(4, 5, 8));
-    print_string_embedded(scanner->busy ? "PLEASE WAIT..." : "A SCAN / RETRY", 44, 161, screen);
-    draw_rounded_box(screen, 166, 152, 82, 24, 7, RGB15(31, 31, 31), RGB15(4, 5, 8));
+    ui_draw_button(screen, &(UiButton){
+        .card = { .bounds = { 8, 152, 150, 24 }, .radius = 7,
+                  .surface = scanner->busy ? UI_SURFACE_HIGHLIGHT : UI_SURFACE_MUTED },
+        .label = { .value = scanner->busy ? "PLEASE WAIT..." : "A SCAN / RETRY",
+                   .x = 44, .y = 161, .color = UI_COLOR_INK, .scale = 1 }
+    });
+    ui_draw_card(screen, &(UiCard){ .bounds = { 166, 152, 82, 24 }, .radius = 7, .surface = UI_SURFACE_CARD });
     print_string_embedded("B BACK", 189, 161, screen);
     print_string_embedded("ALIGN QR CODE ON THE TOP SCREEN", 38, 183, screen);
 }
