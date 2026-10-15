@@ -117,7 +117,7 @@ static void draw_bottom(u16* vram, int selected, int kb_mode) {
 static void save_profile(const char values[FIELD_COUNT][FIELD_LENGTH],
                          const char* timestamp_str) {
     char path[512];
-#ifdef EMU
+#ifdef EMU_NO_SD
     int path_length = snprintf(path, sizeof(path), "%s/emulator/profile.json", ROOT_DIR);
 #else
     int path_length = snprintf(path, sizeof(path), "%s/%s/profile.json",

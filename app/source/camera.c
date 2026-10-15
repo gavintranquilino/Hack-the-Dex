@@ -9,7 +9,7 @@
 #define CAMERA_HEIGHT 192
 
 static int save_picture(const char* path, const u16* vram_data) {
-#ifdef EMU
+#ifdef EMU_NO_SD
     // Bypassing file I/O completely on emulator to prevent DLDI write crashes.
     return 1; 
 #else

@@ -10,22 +10,40 @@ NAME := hack_the_dex
 GAME_TITLE := Hack the Dex
 GAME_SUBTITLE := Hack the North 2026 Project
 
-# Emulator build
+# Build modes. With no flag, build the offline SD-card version.
 EMU ?= 0
-OFFLINE ?= 0
+EMU-NO-SD ?= 0
+HACKTHENORTH ?= 0
 
 SOURCEDIRS := source
 INCLUDEDIRS := include
 
-ifeq ($(EMU),1)
-    CFLAGS += -DEMU
-    NAME := hack_the_dex_emu
+BUILD_MODE_COUNT := $(shell expr $(EMU) + $(EMU-NO-SD) + $(HACKTHENORTH))
+ifneq ($(BUILD_MODE_COUNT),0)
+ifneq ($(BUILD_MODE_COUNT),1)
+    $(error Select at most one build mode: EMU=1, EMU-NO-SD=1, or HACKTHENORTH=1)
+endif
 endif
 
-ifeq ($(OFFLINE),1)
+ifeq ($(HACKTHENORTH),1)
+    NAME := hack_the_dex
+    CFLAGS += -DHACKTHENORTH
+else
     NAME := hack_the_dex_offline
     GAME_TITLE := Hack the Dex [Offline]
     CFLAGS += -DOFFLINE
+endif
+
+ifeq ($(EMU),1)
+    NAME := hack_the_dex_emu
+    GAME_TITLE := Hack the Dex [Emulator]
+    CFLAGS += -DEMU
+endif
+
+ifeq ($(EMU-NO-SD),1)
+    NAME := hack_the_dex_emu_no_sd
+    GAME_TITLE := Hack the Dex [Emulator No SD]
+    CFLAGS += -DEMU_NO_SD
 endif
 
 # Libraries

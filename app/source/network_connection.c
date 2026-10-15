@@ -32,7 +32,7 @@ extern int global_port_number;
 #define NETWORK_TIMEOUT_FRAMES (60 * 60)
 #define MAX_PROFILE_BYTES (16 * 1024)
 
-#ifdef EMU
+#ifdef EMU_NO_SD
 #define PROFILE_DIR ROOT_DIR "/emulator"
 #endif
 
@@ -454,7 +454,7 @@ done:
 
 int show_network_connection_screen(u16* top_vram, u16* bottom_vram, const char* timestamp_str) {
     char json_path[512];
-#ifdef EMU
+#ifdef EMU_NO_SD
     (void)timestamp_str;
     int path_length = snprintf(json_path, sizeof(json_path), "%s/profile.json", PROFILE_DIR);
 #else

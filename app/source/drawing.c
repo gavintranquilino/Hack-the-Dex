@@ -117,7 +117,7 @@ static void put_u32(unsigned char *p, uint32_t value) {
 }
 
 static bool save_bmp(const char *path, u16* canvas) {
-#ifdef EMU
+#ifdef EMU_NO_SD
     // Bypassing file I/O completely on emulator to prevent DLDI write crashes.
     return true;
 #else
