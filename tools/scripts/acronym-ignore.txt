@@ -131,3 +131,14 @@ TORT
 WARNING
 WARRANTIES
 WARRANTY
+# UI guide headings and button labels; these are ordinary words, not acronyms.
+DRAW
+DRAWING
+FIND
+FRIEND
+LINK
+PHOTO
+SAVE
+SCAN
+STATUS
+STYLES
