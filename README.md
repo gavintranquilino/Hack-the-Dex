@@ -27,8 +27,8 @@ cd app
 make
 ```
 
-The default build is the online Hack the North release and produces
-`app/hack_the_dex.nds`.
+The default build is the offline SD-card build and produces
+`app/hack_the_dex_offline.nds`.
 
 ### Build flags
 
@@ -36,9 +36,10 @@ The Makefile accepts these boolean flags:
 
 | Command | Result |
 | --- | --- |
-| `make` | Online release build: `hack_the_dex.nds` |
-| `make EMU=1` | Emulator build: `hack_the_dex_emu.nds` |
-| `make OFFLINE=1` | Offline build: `hack_the_dex_offline.nds` |
+| `make` | Offline SD-card build: `hack_the_dex_offline.nds` |
+| `make EMU=1` | Offline emulator build with SD-card reads and writes: `hack_the_dex_emu.nds` |
+| `make EMU-NO-SD=1` | Offline emulator build that performs no SD-card writes: `hack_the_dex_emu_no_sd.nds` |
+| `make HACKTHENORTH=1` | Online Hack the North build: `hack_the_dex.nds` |
 
 To use a BlocksDS installation elsewhere:
 
@@ -46,11 +47,12 @@ To use a BlocksDS installation elsewhere:
 make BLOCKSDS=/path/to/blocksds/core
 ```
 
-`EMU=1` defines `EMU`, skips the live network setup, and uses emulator-safe
-profile paths and camera file behavior. `OFFLINE=1` defines `OFFLINE`, skips
-the Wi-Fi and QR profile flow, and opens the local profile-entry experience.
-Use one mode flag at a time; the flags are compile-time options, not runtime
-settings.
+`EMU=1` runs the offline profile-entry flow while retaining SD-card reads and
+writes. `EMU-NO-SD=1` is the emulator-safe variant: it uses a pre-created
+`sd:/hackthedex/emulator` path and bypasses photo and drawing writes.
+`HACKTHENORTH=1` enables the Wi-Fi and QR profile flow in
+`network_connection.c`. Use at most one mode flag at a time; the flags are
+compile-time options, not runtime settings.
 
 ## Run the web companion
 

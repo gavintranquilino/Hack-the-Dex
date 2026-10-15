@@ -17,18 +17,20 @@ repository's documentation and code.
 | DS | Nintendo's dual-screen handheld console family. In this project, "DS mode" means a future mode that reduces or removes features specific to DSi hardware, especially the camera content. |
 | DSi | The Nintendo DSi revision of the DS. It adds cameras and other hardware used by the online Hack the Dex experience. |
 | DLDI | The Dynamically Linked Device Interface used by DS flashcarts and related hardware to provide SD-card access. Emulator file behavior is kept separate because DLDI-backed writes may not be available or safe there. |
-| DLDI write | A file write performed through the DS storage device interface. The normal hardware build uses these writes for saved profiles and images; the emulator build avoids some of them because emulator storage behavior differs. |
+| DLDI write | A file write performed through the DS storage device interface. Offline, online, and SD-enabled emulator builds use these writes for saved profiles and images; the no-SD emulator build bypasses them. |
 | DSWiFi | The BlocksDS/libnds Wi-Fi library used to initialize the DSi network hardware and make the application's TCP connection. |
-| Emulator build | The application built with `EMU=1`. It is intended for a Nintendo DS emulator and uses emulator-specific paths and file behavior. |
-| `EMU=1` | A compile-time Make variable that defines `EMU`, selects the emulator output name, skips the live setup screen, and uses emulator-safe profile behavior. |
+| Emulator build | The application built with `EMU=1`. It is intended for a Nintendo DS emulator with its SD card enabled and retains normal SD-card reads and writes. |
+| `EMU=1` | A compile-time Make variable that selects the SD-enabled emulator output and offline profile-entry flow. |
+| `EMU-NO-SD=1` | A compile-time Make variable that selects the emulator-safe offline build and bypasses SD-card writes. |
+| `HACKTHENORTH=1` | A compile-time Make variable that selects the online build with Wi-Fi, QR scanning, and profile retrieval. |
 | Hack the Dex | The Nintendo DS/DSi friendship and profile-sharing application built for Hack the North 2026. |
 | JSON | JavaScript Object Notation, the text format used for profile data exchanged between the web companion and the DS and stored in `profile.json`. |
 | libnds | The Nintendo DS programming library used by the application for hardware APIs, graphics, input, timing, and system services. |
-| Make / Makefile | `make` is the command-line build tool. A Makefile describes how source files are compiled and linked. The project Makefile is [`app/Makefile`](../app/Makefile) and accepts the `EMU`, `OFFLINE`, and `BLOCKSDS` variables. |
+| Make / Makefile | `make` is the command-line build tool. A Makefile describes how source files are compiled and linked. The project Makefile is [`app/Makefile`](../app/Makefile) and accepts the `EMU`, `EMU-NO-SD`, `HACKTHENORTH`, and `BLOCKSDS` variables. |
 | ngrok | A tunneling tool that exposes the desktop receiver through a temporary public TCP endpoint. The DS connects to the host and port displayed by the web companion. |
 | ngrok host and port | The endpoint entered on the DS setup screen. A host such as `2.tcp.ngrok.io` identifies the tunnel and the port identifies the forwarded receiver connection. Free tunnel endpoints may change when ngrok restarts. |
-| Offline build | The application built with `OFFLINE=1`. It skips Wi-Fi and QR profile retrieval and provides local profile entry for testing or use without the web companion. |
-| Online build | The default application build. It uses the DSi camera and Wi-Fi to send a captured QR image to the desktop web companion and receive a profile response. |
+| Offline build | The default application build. It skips Wi-Fi and QR profile retrieval and provides local profile entry for testing or use without the web companion. |
+| Online build | The application built with `HACKTHENORTH=1`. It uses the DSi camera and Wi-Fi to send a captured QR image to the desktop web companion and receive a profile response. |
 | Playwright | A browser automation library used by the web companion to navigate the Hack the North site and read the profile associated with a scanned QR code. |
 | Profile | A person's Hack the North information and associated assets. In the application it is represented primarily as JSON plus optional photo and signature image files. |
 | Profile exchange | The complete interaction of scanning a friend's QR code, looking up their profile, adding a photo and drawing, and saving the result locally. |

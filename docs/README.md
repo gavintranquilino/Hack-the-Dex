@@ -33,24 +33,25 @@ setup, authentication, ngrok, and runtime instructions.
 
 ## Application modes
 
-The BlocksDS Makefile in [`app/Makefile`](../app/Makefile) controls three
+The BlocksDS Makefile in [`app/Makefile`](../app/Makefile) controls four
 compile-time builds:
 
-- The default build is the online release and starts with host and port setup.
-- `EMU=1` builds an emulator-oriented version and avoids hardware-specific
-  file behavior that is unsafe in the emulator.
-- `OFFLINE=1` builds a local profile-entry version without Wi-Fi or QR profile
-  retrieval.
+- The default build is an offline local-profile version with SD-card storage.
+- `EMU=1` builds the same offline flow for an emulator with SD-card storage
+  enabled.
+- `EMU-NO-SD=1` builds the emulator-safe offline flow that bypasses SD-card
+  writes.
+- `HACKTHENORTH=1` enables the online Wi-Fi and QR profile-retrieval flow.
 
 The root [`README.md`](../README.md) contains the build commands and expected
 `.nds` output names.
 
 ## Storage
 
-Profiles are stored below `sd:/hackthedex`. Online profiles use timestamped
-directories containing the profile JSON and captured assets. Emulator builds
-use `sd:/hackthedex/emulator` so repeated tests do not depend on DSi storage
-behavior.
+Profiles are stored below `sd:/hackthedex`. Offline, online, and SD-enabled
+emulator builds use timestamped directories containing the profile JSON and
+captured assets. The no-SD emulator build uses `sd:/hackthedex/emulator` and
+does not write captured assets.
 
 ## Repository layout
 

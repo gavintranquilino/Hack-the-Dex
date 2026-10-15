@@ -21,7 +21,7 @@
 
 #define ROOT_DIR "sd:/hackthedex"
 
-#ifdef EMU
+#ifdef EMU_NO_SD
 #define PROFILE_DIR ROOT_DIR "/emulator"
 #endif
 
@@ -413,14 +413,50 @@ void update_bottom_screen(u16* vram) {
     free(screen);
 }
 
+// Storage operations can block indefinitely when an emulator has no usable
+// DLDI/homebrew SD image. Draw the operation first so a stalled call has a
+// useful, visible diagnosis instead of looking like an input freeze.
+static void draw_storage_status(u16* top_vram, u16* bottom_vram,
+                                const char* title, const char* detail,
+                                bool is_error) {
+    const u16 background = RGB15(31, 31, 31) | BIT(15);
+    const u16 accent = is_error ? RGB15(23, 4, 6) : RGB15(22, 27, 31);
+
+    dmaFillHalfWords(background, top_vram, 256 * 192 * sizeof(u16));
+    dmaFillHalfWords(background, bottom_vram, 256 * 192 * sizeof(u16));
+    draw_rounded_box(top_vram, 8, 8, 240, 176, 10, background, accent);
+    draw_rounded_box(bottom_vram, 8, 8, 240, 176, 10, background, accent);
+    print_text("HACK THE DEX", 24, 24, top_vram, accent, 2);
+    print_text(title, 18, 68, top_vram, accent, 1);
+    print_text_fit(detail, 18, 92, 36, top_vram, RGB15(4, 5, 8), 1);
+    print_text("SD CARD STATUS", 44, 35, bottom_vram, accent, 2);
+    if (is_error) {
+        print_text("HOME BREW SD UNAVAILABLE", 18, 78, bottom_vram, accent, 1);
+        print_text("CHECK MELONDS DLDI SD CARD", 18, 101, bottom_vram,
+                   RGB15(4, 5, 8), 1);
+        print_text("B  RETURN TO MENU", 57, 157, bottom_vram,
+                   RGB15(4, 5, 8), 1);
+    } else {
+        print_text("PLEASE WAIT", 86, 102, bottom_vram,
+                   RGB15(4, 5, 8), 1);
+    }
+}
+
+static void show_storage_error(u16* top_vram, u16* bottom_vram,
+                               const char* title, const char* detail) {
+    draw_storage_status(top_vram, bottom_vram, title, detail, true);
+    while (1) {
+        swiWaitForVBlank();
+        scanKeys();
+        if (keysDown() & KEY_B)
+            return;
+    }
+}
+
 // ---------------------------------------------------------
 // Main
 // ---------------------------------------------------------
 int main(int argc, char* argv[]) {
-    if (!fatInitDefault()) {
-        while(1) swiWaitForVBlank();
-    }
-
     // Clean initialization for both screens as Bitmaps (Mode 5)
     videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
     videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
@@ -434,7 +470,15 @@ int main(int argc, char* argv[]) {
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
 
-#if !defined(OFFLINE) && !defined(EMU)
+    draw_storage_status(top_vram, bottom_vram, "CHECKING SD CARD",
+                        "MOUNTING HOME BREW STORAGE", false);
+    if (!fatInitDefault()) {
+        show_storage_error(top_vram, bottom_vram, "SD CARD NOT MOUNTED",
+                           "ENABLE A WRITABLE DLDI SD IMAGE");
+        return 0;
+    }
+
+#ifdef HACKTHENORTH
 
     show_setup_screen(top_vram, bottom_vram, &global_host_number, &global_port_number);
 
@@ -497,7 +541,7 @@ int main(int argc, char* argv[]) {
                 char photo_path[512];
                 char signature_path[512]; // ADDED
 
-#ifdef EMU
+#ifdef EMU_NO_SD
                 // Pre-create sd:/hackthedex/emulator in the SD image. MelonDS does not
                 // reliably support runtime directory creation through its SD backend.
                 snprintf(photo_path, sizeof(photo_path), "%s/photo.bmp", PROFILE_DIR);
@@ -506,7 +550,13 @@ int main(int argc, char* argv[]) {
                 char dir_path[512];
                 snprintf(dir_path, sizeof(dir_path), "%s/%s", ROOT_DIR, timestamp_str);
 
+                draw_storage_status(top_vram, bottom_vram, "CREATING PROFILE FOLDER",
+                                    "WRITING TO HOME BREW SD CARD", false);
                 if (!ensure_directory(ROOT_DIR) || !ensure_directory(dir_path)) {
+                    show_storage_error(top_vram, bottom_vram,
+                                       "CANNOT CREATE PROFILE FOLDER",
+                                       "CHECK DLDI SD FORMAT AND WRITE ACCESS");
+                    prev_index = -1;
                     continue;
                 }
                 snprintf(photo_path, sizeof(photo_path), "%s/photo.bmp", dir_path);
@@ -516,7 +566,7 @@ int main(int argc, char* argv[]) {
                 // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
                 int status;
 
-#if defined(OFFLINE) || defined(EMU)
+#ifndef HACKTHENORTH
 
                 status = show_offline_credentials_screen(top_vram, bottom_vram, timestamp_str);
 
