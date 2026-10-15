@@ -6,7 +6,8 @@ retrieve their Hack the North profile, take a photo, draw a signature, and save
 the resulting profile locally on the SD card.
 
 See the [glossary](GLOSSARY.md) for definitions of project terminology,
-hardware, build tools, networking tools, and data formats.
+hardware, build tools, networking tools, and data formats. See the
+[DS UI Styles guide](STYLES.md) for the shared UI element API and examples.
 
 ## System overview
 

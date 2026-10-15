@@ -3,27 +3,24 @@
 #include <string.h>
 
 #include "drawing.h"
+#include "styles.h"
 
 static void draw_setup_ui(u16* top, u16* bottom, int active_mode, int cursor_pos, int host_val, int* port_digits) {
-    for (int i = 0; i < 256 * 192; i++) {
-        top[i] = bottom[i] = RGB15(31, 31, 31) | BIT(15);
-    }
-    draw_rounded_box(top, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    draw_rounded_box(bottom, 0, 0, 256, 192, 10, RGB15(31, 31, 31), RGB15(28, 14, 15));
-    draw_rounded_box(top, 8, 11, 240, 44, 10, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(top, 8, 8, 240, 44, 10, RGB15(31, 21, 21), RGB15(4, 5, 8));
+    ui_begin_screen(top);
+    ui_begin_screen(bottom);
+    ui_draw_button(top, &(UiButton){ .card = { .bounds = { 8, 8, 240, 44 }, .radius = 10, .surface = UI_SURFACE_SELECTED } });
     print_text("HACK THE DEX", 24, 18, top, RGB15(4, 5, 8), 2);
     print_string_embedded("YOUR NEXT FRIEND IS OUT THERE", 24, 38, top);
-    draw_rounded_box(top, 8, 64, 240, 113, 10, RGB15(31, 31, 31), RGB15(4, 5, 8));
+    ui_draw_card(top, &(UiCard){ .bounds = { 8, 64, 240, 113 }, .radius = 10, .surface = UI_SURFACE_CARD });
     print_text("LET'S CONNECT", 24, 79, top, RGB15(4, 5, 8), 2);
     print_string_embedded("1  SET YOUR HOST AND PORT", 24, 108, top);
     print_string_embedded("2  SCAN A FRIEND'S QR CODE", 24, 128, top);
     print_string_embedded("3  ADD A PHOTO + A DRAWING", 24, 148, top);
 
-    print_text("LINK SETUP", 12, 10, bottom, RGB15(21, 5, 7), 2);
+    ui_draw_text(bottom, &(UiText){ .value = "LINK SETUP", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
     print_string_embedded("X SWITCH FIELD   SELECT DEFAULTS", 12, 32, bottom);
-    draw_rounded_box(bottom, 8, 48, 54, 61, 8, RGB15(31, 31, 31), RGB15(4, 5, 8));
-    draw_rounded_box(bottom, 68, 48, 180, 61, 8, RGB15(31, 31, 31), RGB15(4, 5, 8));
+    ui_draw_card(bottom, &(UiCard){ .bounds = { 8, 48, 54, 61 }, .radius = 8, .surface = UI_SURFACE_CARD });
+    ui_draw_card(bottom, &(UiCard){ .bounds = { 68, 48, 180, 61 }, .radius = 8, .surface = UI_SURFACE_CARD });
     print_string_embedded("HOST", 23, 55, bottom);
     print_string_embedded("PORT", 80, 55, bottom);
     char digit[2] = {'0' + host_val, 0};
@@ -41,9 +38,10 @@ static void draw_setup_ui(u16* top, u16* bottom, int active_mode, int cursor_pos
     }
     if (active_mode == 0) print_string_embedded("^", 32, 102, bottom);
     print_string_embedded("UP/DOWN CHANGE   LEFT/RIGHT MOVE", 12, 119, bottom);
-    draw_rounded_box(bottom, 8, 138, 240, 33, 9, RGB15(4, 5, 8), RGB15(4, 5, 8));
-    draw_rounded_box(bottom, 8, 135, 240, 33, 9, RGB15(31, 21, 21), RGB15(4, 5, 8));
-    print_text("A  LET'S GO!", 62, 145, bottom, RGB15(4, 5, 8), 2);
+    ui_draw_button(bottom, &(UiButton){
+        .card = { .bounds = { 8, 135, 240, 33 }, .radius = 9, .surface = UI_SURFACE_SELECTED },
+        .label = { .value = "A  LET'S GO!", .x = 62, .y = 145, .color = UI_COLOR_INK, .scale = 2 }
+    });
     print_string_embedded("TAP A DIGIT TO SELECT IT", 59, 180, bottom);
 }
 

@@ -28,7 +28,7 @@ make
 ```
 
 The default build is the offline SD-card build and produces
-`app/hack_the_dex_offline.nds`.
+`builds/roms/hack_the_dex_offline.nds`.
 
 ### Build flags
 
@@ -36,10 +36,10 @@ The Makefile accepts these boolean flags:
 
 | Command | Result |
 | --- | --- |
-| `make` | Offline SD-card build: `hack_the_dex_offline.nds` |
-| `make EMU=1` | Offline emulator build with SD-card reads and writes: `hack_the_dex_emu.nds` |
-| `make EMU-NO-SD=1` | Offline emulator build that performs no SD-card writes: `hack_the_dex_emu_no_sd.nds` |
-| `make HACKTHENORTH=1` | Online Hack the North build: `hack_the_dex.nds` |
+| `make` | Offline SD-card build: `builds/roms/hack_the_dex_offline.nds` |
+| `make EMU=1` | Offline emulator build with SD-card reads and writes: `builds/roms/hack_the_dex_emu.nds` |
+| `make EMU-NO-SD=1` | Offline emulator build that performs no SD-card writes: `builds/roms/hack_the_dex_emu_no_sd.nds` |
+| `make HACKTHENORTH=1` | Online Hack the North build: `builds/roms/hack_the_dex.nds` |
 
 To use a BlocksDS installation elsewhere:
 
