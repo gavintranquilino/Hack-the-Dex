@@ -12,6 +12,7 @@ repository's documentation and code.
 | CDP | Chrome DevTools Protocol, the browser control protocol used by Playwright to connect to the already-running Chromium session on port `9222`. |
 | Chromium | The browser used by the web companion to open the Hack the North website and maintain a dedicated authenticated profile. |
 | cJSON | The small C JSON parser and generator included in [`app/`](../app/). It lets the DS read and validate profile responses. |
+| CLI | Command Line Interface, the text-based interface used to interact with the system or application. |
 | DNS | The hostname lookup step that resolves the ngrok host into a network address before the DS opens its TCP connection. |
 | Download Play | A Nintendo DS wireless feature for sending or sharing content between nearby DS systems. Sending files through Download Play is listed as future work and is not currently implemented. |
 | DS | Nintendo's dual-screen handheld console family. In this project, "DS mode" means a future mode that reduces or removes features specific to DSi hardware, especially the camera content. |

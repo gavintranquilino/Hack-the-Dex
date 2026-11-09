@@ -1,0 +1,14 @@
+{
+  "name": "Hack the Dex (BlocksDS)",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteUser": "root",
+  "containerEnv": {
+    "BLOCKSDS": "/opt/wonderful/thirdparty/blocksds/core",
+    "BLOCKSDSEXT": "/opt/wonderful/thirdparty/blocksds/external"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh"
+}
