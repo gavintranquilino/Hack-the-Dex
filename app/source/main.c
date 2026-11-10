@@ -569,26 +569,21 @@ int main(int argc, char* argv[]) {
                 snprintf(signature_path, sizeof(signature_path), "%s/signature.bmp", dir_path); // ADDED
 #endif
 
-                // 3. Launch the Network Connection Screen (UI only - JSON will be downloaded here later)
-                int status;
-
+                // Gather the portrait and drawing first, then enter or scan
+                // the profile details so the flow follows the user's order.
+                if (show_camera_capture(top_vram, bottom_vram, photo_path) &&
+                    show_drawing_capture(top_vram, bottom_vram, signature_path)) {
+                    int status;
 #ifndef HACKTHENORTH
-
-                status = show_offline_credentials_screen(top_vram, bottom_vram, timestamp_str);
-
+                    status = show_offline_credentials_screen(top_vram, bottom_vram,
+                                                             timestamp_str);
 #else
-
-                status = show_network_connection_screen(top_vram, bottom_vram, timestamp_str);
-
-#endif // end of offline determination
-
-
-                if (status == 0) {
-                    if (show_camera_capture(top_vram, bottom_vram, photo_path)) {
-                        if (show_drawing_capture(top_vram, bottom_vram, signature_path)) {
-                            load_users();
-                            total_items = num_users + 1;
-                        }
+                    status = show_network_connection_screen(top_vram, bottom_vram,
+                                                            timestamp_str);
+#endif
+                    if (status == 0) {
+                        load_users();
+                        total_items = num_users + 1;
                     }
                 }
 

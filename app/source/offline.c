@@ -77,7 +77,7 @@ static void draw_bottom(u16* vram, int selected, int kb_mode) {
     if (!screen) return;
 
     ui_begin_screen(screen);
-    ui_draw_text(screen, &(UiText){ .value = "ENTER YOUR INFO", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
+    ui_draw_text(screen, &(UiText){ .value = "03 OPTIONAL INFO", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
     
     // Adjusted spacing slightly so it doesn't clip off the edges of the 256px screen
     print_string_embedded("UP/DOWN=SELECT FIELD  A=DONE  B=BACK", 20, 31, screen);

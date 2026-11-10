@@ -59,7 +59,7 @@ static void draw_scanner_ui(Scanner* scanner, const char* message) {
     ui_draw_page_header(screen, &(UiPageHeader){
         .title = { .value = "FIND A FRIEND", .x = 12, .y = 10,
                    .color = UI_COLOR_HEADING, .scale = 2 },
-        .hint = { .value = "01 SCAN > 02 PHOTO > 03 DRAW", .x = 12, .y = 32,
+        .hint = { .value = "01 PHOTO > 02 DRAW > 03 PROFILE", .x = 12, .y = 32,
                   .color = UI_COLOR_INK, .scale = 1 }
     });
     draw_rounded_box(screen, 8, 48, 240, 99, 9, RGB15(31, 31, 31), RGB15(4, 5, 8));

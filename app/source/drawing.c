@@ -140,7 +140,7 @@ static bool save_bmp(const char *path, u16* canvas) {
 static void draw_top_ui(u16* screen, int color_idx, int size_idx, int eraser_active) {
     ui_begin_screen(screen);
     ui_draw_text(screen, &(UiText){ .value = "MAKE YOUR MARK", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
-    ui_draw_text(screen, &(UiText){ .value = "01 SCAN > 02 PHOTO > 03 DRAW", .x = 12, .y = 32, .color = UI_COLOR_INK, .scale = 1 });
+    ui_draw_text(screen, &(UiText){ .value = "01 PHOTO > 02 DRAW > 03 DETAILS", .x = 12, .y = 32, .color = UI_COLOR_INK, .scale = 1 });
     ui_draw_card(screen, &(UiCard){ .bounds = { 8, 47, 240, 81 }, .radius = 9, .surface = UI_SURFACE_CARD });
     print_string_embedded("INK", 18, 58, screen);
     print_string_embedded(eraser_active ? "ERASER ON" : color_names[color_idx], 54, 58, screen);
