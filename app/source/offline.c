@@ -30,7 +30,7 @@ static const char* keyboard_upper[KEYBOARD_ROWS] = {
 
 static const char* keyboard_sym[KEYBOARD_ROWS] = {
     "!@#$%^&*()",
-    "-+=[]{}|~`", // Now includes { } | ~ `
+    "-+=[]{}|~_", // Includes underscore for usernames and handles
     ":;\"'<>,.?\\", // Now includes the backslash \ and quotes
     "0123456789"
 };
@@ -113,13 +113,14 @@ static void draw_bottom(u16* vram, int selected, int kb_mode) {
 
 static void save_profile(const char values[FIELD_COUNT][FIELD_LENGTH],
                          const char* timestamp_str) {
-    char path[512];
 #ifdef EMU_NO_SD
-    int path_length = snprintf(path, sizeof(path), "%s/emulator/profile.json", ROOT_DIR);
+    // The no-SD emulator build is for testing the entry UI, not persistence.
+    (void)values;
+    (void)timestamp_str;
 #else
+    char path[512];
     int path_length = snprintf(path, sizeof(path), "%s/%s/profile.json",
                                ROOT_DIR, timestamp_str ? timestamp_str : "offline");
-#endif
     if (path_length < 0 || (size_t)path_length >= sizeof(path)) return;
 
     FILE* file = fopen(path, "wb");
@@ -153,6 +154,7 @@ static void save_profile(const char values[FIELD_COUNT][FIELD_LENGTH],
             escaped_values[0], escaped_values[1], escaped_values[2], 
             escaped_values[3], escaped_values[4], escaped_values[5]);
     fclose(file);
+#endif
 }
 
 int show_offline_credentials_screen(u16* top_vram, u16* bottom_vram,

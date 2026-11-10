@@ -41,12 +41,13 @@ This builds the offline SD-card ROM in `app/build/roms/`. Optional build modes
 
 ```sh
 make EMU=1           # emulator build with SD-card reads and writes
-make EMU-NO-SD=1     # emulator build without SD-card writes
+make EMU-NO-SD=1     # emulator UI build with no SD-card access or persistence
 make HACKTHENORTH=1  # online Hack the North profile flow
 ```
 
 Choose and configure an emulator on your host; melonDS is recommended. The
-container only builds the ROM.
+camera flow requires DSi mode and working camera emulation. The container only
+builds the ROM.
 
 The legacy web companion is deprecated but remains in this branch. Its
 instructions are in [`../web/README.md`](../web/README.md).

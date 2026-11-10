@@ -235,6 +235,10 @@ void parse_profile(const char* path, DexUser* user) {
 
 void load_users() {
     num_users = 0;
+#ifdef EMU_NO_SD
+    // This build is for emulator UI testing without a mounted DLDI filesystem.
+    return;
+#else
     DIR* dir = opendir(ROOT_DIR);
     if (!dir) return;
 
@@ -260,6 +264,7 @@ void load_users() {
         }
     }
     closedir(dir);
+#endif
 }
 
 // ---------------------------------------------------------
@@ -413,6 +418,7 @@ void update_bottom_screen(u16* vram) {
 // Storage operations can block indefinitely when an emulator has no usable
 // DLDI/homebrew SD image. Draw the operation first so a stalled call has a
 // useful, visible diagnosis instead of looking like an input freeze.
+#ifndef EMU_NO_SD
 static void draw_storage_status(u16* top_vram, u16* bottom_vram,
                                 const char* title, const char* detail,
                                 bool is_error) {
@@ -449,6 +455,7 @@ static void show_storage_error(u16* top_vram, u16* bottom_vram,
             return;
     }
 }
+#endif
 
 // ---------------------------------------------------------
 // Main
@@ -467,6 +474,7 @@ int main(int argc, char* argv[]) {
     int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
     u16* bottom_vram = bgGetGfxPtr(bg3_sub);
 
+#ifndef EMU_NO_SD
     draw_storage_status(top_vram, bottom_vram, "CHECKING SD CARD",
                         "MOUNTING HOME BREW STORAGE", false);
     if (!fatInitDefault()) {
@@ -474,6 +482,7 @@ int main(int argc, char* argv[]) {
                            "ENABLE A WRITABLE DLDI SD IMAGE");
         return 0;
     }
+#endif
 
 #ifdef HACKTHENORTH
 
