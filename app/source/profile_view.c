@@ -6,6 +6,7 @@
 
 #include "drawing.h"
 #include "styles.h"
+#include "offline.h"
 
 static void draw_scaled_bmp_box(const char* path, u16* offscreen, int bx, int by, int bw, int bh) {
     draw_rounded_box(offscreen, bx - 3, by - 3, bw + 6, bh + 6, 8,
@@ -67,10 +68,7 @@ static void social_row(u16* screen, int y, const char* label, const char* value,
     if (strlen(value) > 36) print_string_embedded(value + 36, 18, y + 22, screen);
 }
 
-void show_profile_view(DexUser* user, u16* top_vram) {
-    videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
-    int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
-    u16* bottom_vram = bgGetGfxPtr(bg3_sub);
+static void draw_profile_view(const DexUser* user, u16* top_vram, u16* bottom_vram) {
     u16* top = malloc(256 * 192 * sizeof(u16));
     u16* bottom = malloc(256 * 192 * sizeof(u16));
     if (!top || !bottom) { free(top); free(bottom); return; }
@@ -99,13 +97,24 @@ void show_profile_view(DexUser* user, u16* top_vram) {
     social_row(bottom, 100, "INSTAGRAM", user->instagram, RGB15(23, 4, 10));
     social_row(bottom, 134, "LINKEDIN", user->linkedin, RGB15(1, 12, 22));
     ui_draw_button(bottom, &(UiButton){
-        .card = { .bounds = { 8, 171, 240, 19 }, .radius = 6, .surface = UI_SURFACE_MUTED },
-        .label = { .value = "B  BACK TO YOUR DEX", .x = 74, .y = 177, .color = UI_COLOR_INK, .scale = 1 }
+        .card = { .bounds = { 8, 171, 116, 19 }, .radius = 6, .surface = UI_SURFACE_MUTED },
+        .label = { .value = "B BACK", .x = 48, .y = 177, .color = UI_COLOR_INK, .scale = 1 }
+    });
+    ui_draw_button(bottom, &(UiButton){
+        .card = { .bounds = { 132, 171, 116, 19 }, .radius = 6, .surface = UI_SURFACE_SELECTED },
+        .label = { .value = "EDIT SOCIALS", .x = 154, .y = 177, .color = UI_COLOR_INK, .scale = 1 }
     });
     dmaCopy(top, top_vram, 256 * 192 * sizeof(u16));
     dmaCopy(bottom, bottom_vram, 256 * 192 * sizeof(u16));
     free(top);
     free(bottom);
+}
+
+void show_profile_view(DexUser* user, u16* top_vram) {
+    videoSetModeSub(MODE_5_2D | DISPLAY_BG3_ACTIVE);
+    int bg3_sub = bgInitSub(3, BgType_Bmp16, BgSize_B16_256x256, 0, 0);
+    u16* bottom_vram = bgGetGfxPtr(bg3_sub);
+    draw_profile_view(user, top_vram, bottom_vram);
     while (1) {
         swiWaitForVBlank();
         scanKeys();
@@ -113,7 +122,13 @@ void show_profile_view(DexUser* user, u16* top_vram) {
         if (keysDown() & KEY_TOUCH) {
             touchPosition touch;
             touchRead(&touch);
-            if (touch.px >= 8 && touch.px < 248 && touch.py >= 171 && touch.py < 190) break;
+            if (touch.py >= 171 && touch.py < 190) {
+                if (touch.px >= 8 && touch.px < 124) break;
+                if (touch.px >= 132 && touch.px < 248) {
+                    show_edit_socials_screen(top_vram, bottom_vram, user);
+                    draw_profile_view(user, top_vram, bottom_vram);
+                }
+            }
         }
     }
 }

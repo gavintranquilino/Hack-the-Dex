@@ -1,6 +1,7 @@
 #include "offline.h"
 #include "drawing.h"
 #include "styles.h"
+#include "profile_storage.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h> // for malloc/free
@@ -35,9 +36,9 @@ static const char* keyboard_sym[KEYBOARD_ROWS] = {
     "0123456789"
 };
 
-static void draw_field(u16* screen, int index, int selected,
+static void draw_field(u16* screen, int index, int row, int selected,
                        const char* value) {
-    int y = 8 + index * 29;
+    int y = 8 + row * 29;
     draw_rounded_box(screen, 8, y + 2, 240, 26, 6,
                      RGB15(4, 5, 8), RGB15(4, 5, 8));
     draw_rounded_box(screen, 8, y, 240, 26, 6,
@@ -48,15 +49,15 @@ static void draw_field(u16* screen, int index, int selected,
                    screen, RGB15(4, 5, 8), 1);
 }
 
-static void draw_top(u16* vram, int selected, char values[FIELD_COUNT][FIELD_LENGTH]) {
+static void draw_top(u16* vram, int selected, char values[FIELD_COUNT][FIELD_LENGTH], int first_field) {
     // Render to a backbuffer first to eliminate flickering
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
     
     ui_begin_screen(screen);
                      
-    for (int i = 0; i < FIELD_COUNT; i++)
-        draw_field(screen, i, i == selected, values[i]);
+    for (int i = first_field; i < FIELD_COUNT; i++)
+        draw_field(screen, i, i - first_field, i == selected, values[i]);
         
     dmaCopy(screen, vram, 256 * 192 * sizeof(u16));
     free(screen);
@@ -71,16 +72,29 @@ static void draw_key(u16* screen, int x, int y, int width, const char* label) {
     print_string_embedded(label, text_x, y + 8, screen);
 }
 
-static void draw_bottom(u16* vram, int selected, int kb_mode) {
+static void draw_bottom(u16* vram, int kb_mode, int editing, int save_failed) {
     // Render to a backbuffer first to eliminate flickering
     u16* screen = malloc(256 * 192 * sizeof(u16));
     if (!screen) return;
 
     ui_begin_screen(screen);
-    ui_draw_text(screen, &(UiText){ .value = "03 OPTIONAL INFO", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
+    if (editing) {
+        ui_draw_button(screen, &(UiButton){
+            .card = { .bounds = { 8, 6, 116, 20 }, .radius = 5, .surface = UI_SURFACE_MUTED },
+            .label = { .value = "B CANCEL", .x = 42, .y = 12, .color = UI_COLOR_INK, .scale = 1 }
+        });
+        ui_draw_button(screen, &(UiButton){
+            .card = { .bounds = { 132, 6, 116, 20 }, .radius = 5, .surface = UI_SURFACE_SUCCESS },
+            .label = { .value = "A SAVE", .x = 172, .y = 12, .color = UI_COLOR_INK, .scale = 1 }
+        });
+    } else {
+        ui_draw_text(screen, &(UiText){ .value = "03 OPTIONAL INFO", .x = 12, .y = 10, .color = UI_COLOR_HEADING, .scale = 2 });
+    }
     
     // Adjusted spacing slightly so it doesn't clip off the edges of the 256px screen
-    print_string_embedded("UP/DOWN=SELECT FIELD  A=DONE  B=BACK", 20, 31, screen);
+    print_string_embedded(save_failed ? "SAVE FAILED - A RETRY / B CANCEL" :
+                          editing ? "UP/DOWN=SELECT SOCIAL" :
+                          "UP/DOWN=SELECT FIELD  A=DONE  B=BACK", 20, 31, screen);
 
     const char** current_rows;
     if (kb_mode == 2) current_rows = keyboard_sym;
@@ -157,11 +171,13 @@ static void save_profile(const char values[FIELD_COUNT][FIELD_LENGTH],
 #endif
 }
 
-int show_offline_credentials_screen(u16* top_vram, u16* bottom_vram,
-                                     const char* timestamp_str) {
-    char values[FIELD_COUNT][FIELD_LENGTH] = {{0}};
-    int selected = 0;
-    int length = 0;
+static int show_credentials_editor(u16* top_vram, u16* bottom_vram,
+                                    const char* timestamp_str, DexUser* user,
+                                    char values[FIELD_COUNT][FIELD_LENGTH]) {
+    int first_field = user ? 2 : 0;
+    int selected = first_field;
+    int length = (int)strlen(values[selected]);
+    int save_failed = 0;
     int done = 0;
     int dirty = 1; // Force a draw on the first frame
     int kb_mode = 0; // 0 = Lowercase, 1 = Uppercase, 2 = Symbols
@@ -184,27 +200,43 @@ int show_offline_credentials_screen(u16* top_vram, u16* bottom_vram,
         }
 
         // Hardware Button 'B' implementation (Cancel/Back)
-        if (keys_down & KEY_B) {
+        if ((keys_down & KEY_B) || (user && touched &&
+            touch_y >= 6 && touch_y < 26 && touch_x >= 8 && touch_x < 124)) {
             return 1; 
         }
 
         // Hardware Button 'A' implementation (Save/Done)
-        if (keys_down & KEY_A) {
-            save_profile(values, timestamp_str);
-            return 0; 
+        if ((keys_down & KEY_A) || (user && touched &&
+            touch_y >= 6 && touch_y < 26 && touch_x >= 132 && touch_x < 248)) {
+            if (user) {
+                if (!save_profile_socials(user->dir_path, values[2], values[3],
+                                          values[4], values[5])) {
+                    save_failed = 1;
+                    dirty = 1;
+                } else {
+                    strcpy(user->discord, values[2]);
+                    strcpy(user->instagram, values[3]);
+                    strcpy(user->twitter, values[4]);
+                    strcpy(user->linkedin, values[5]);
+                    return 0;
+                }
+            } else {
+                save_profile(values, timestamp_str);
+                return 0;
+            }
         }
 
         // Cycle through options with the D-pad
         if (keys_repeat & KEY_UP) {
             selected--;
-            if (selected < 0) selected = FIELD_COUNT - 1;
+            if (selected < first_field) selected = FIELD_COUNT - 1;
             length = (int)strlen(values[selected]);
             dirty = 1;
         }
 
         if (keys_repeat & KEY_DOWN) {
             selected++;
-            if (selected >= FIELD_COUNT) selected = 0;
+            if (selected >= FIELD_COUNT) selected = first_field;
             length = (int)strlen(values[selected]);
             dirty = 1;
         }
@@ -256,11 +288,26 @@ int show_offline_credentials_screen(u16* top_vram, u16* bottom_vram,
 
         // Only redraw the screen when a change actually occurs (fixes flickering)
         if (dirty) {
-            draw_top(top_vram, selected, values);
-            draw_bottom(bottom_vram, selected, kb_mode);
+            draw_top(top_vram, selected, values, first_field);
+            draw_bottom(bottom_vram, kb_mode, user != NULL, save_failed);
             dirty = 0;
         }
     }
     
     return 1; 
+}
+
+int show_offline_credentials_screen(u16* top_vram, u16* bottom_vram,
+                                     const char* timestamp_str) {
+    char values[FIELD_COUNT][FIELD_LENGTH] = {{0}};
+    return show_credentials_editor(top_vram, bottom_vram, timestamp_str, NULL, values);
+}
+
+int show_edit_socials_screen(u16* top_vram, u16* bottom_vram, DexUser* user) {
+    char values[FIELD_COUNT][FIELD_LENGTH] = {{0}};
+    snprintf(values[2], FIELD_LENGTH, "%s", user->discord);
+    snprintf(values[3], FIELD_LENGTH, "%s", user->instagram);
+    snprintf(values[4], FIELD_LENGTH, "%s", user->twitter);
+    snprintf(values[5], FIELD_LENGTH, "%s", user->linkedin);
+    return show_credentials_editor(top_vram, bottom_vram, NULL, user, values);
 }
